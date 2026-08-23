@@ -1,0 +1,1757 @@
+YOUTUBE REACTION VIDEO PIPELINE
+Developer Step-by-Step Blueprint
+==============================================
+
+PROJECT GOAL
+------------
+Build a Python/Django-based AI-assisted production pipeline for creating weekly
+YouTube reaction/review/criticism videos.
+
+The system should:
+- accept a YouTube video URL
+- obtain and analyze a timestamped transcript
+- select the most useful sections to react to
+- screen-record every selected source segment
+- generate structured reaction/review/criticism content
+- generate intro and outro content
+- generate narration using a chosen/cloned narrator voice
+- plan and acquire visuals for narration sections
+- build a complete video timeline
+- add subtitles, music, and audio mixing
+- render a final MP4
+- run quality control
+- optionally prepare and publish the video to YouTube
+
+The system should also provide user control through CRUD actions and an
+Approve/Lock workflow at every important stage.
+
+CRUD MODEL
+----------
+Create = generate/add
+Read   = view/preview/listen
+Update = edit/change/regenerate/reorder/replace/retry
+Delete = remove/discard/archive
+
+Additional workflow states:
+- Draft
+- Generated
+- Needs Review
+- Approved
+- Locked
+- Failed
+
+Core UX principle:
+
+AI GENERATES
+    ->
+USER REVIEWS
+    ->
+USER CAN:
+- Edit
+- Regenerate
+- Replace
+- Reorder
+- Retry
+- Remove
+    ->
+APPROVE / LOCK
+    ->
+NEXT PIPELINE STAGE
+
+If a locked upstream object is changed, downstream dependent objects should be
+marked stale or invalidated and offered for regeneration.
+
+
+==============================================
+PHASE 0 - PROJECT FOUNDATION
+==============================================
+
+Purpose:
+Create the technical foundation before building pipeline features.
+
+Tasks:
+1. Create Django project.
+2. Define Django app structure.
+3. Configure PostgreSQL.
+4. Configure Redis.
+5. Configure Celery.
+6. Install and verify FFmpeg.
+7. Add environment variable management.
+8. Separate development and production settings.
+9. Define media directories/storage strategy.
+10. Add logging.
+11. Add basic dashboard.
+12. Define provider abstractions for:
+    - LLM
+    - TTS / voice engine
+    - browser automation
+    - stock-media provider
+    - image provider
+13. Add test infrastructure.
+
+Acceptance goal:
+- Django boots.
+- Database works.
+- Celery works.
+- Redis works.
+- FFmpeg works.
+- Basic dashboard loads.
+
+
+==============================================
+PHASE 1 - VIDEO PROJECT
+==============================================
+
+Central model:
+VideoProject
+
+Suggested fields:
+- title
+- source_url
+- status
+- current_pipeline_stage
+- created_at
+- updated_at
+
+User options:
+CREATE
+- Create new project from YouTube URL.
+
+READ
+- Open project.
+- View pipeline status.
+- View project metadata.
+
+UPDATE
+- Rename project.
+- Change project settings.
+
+DELETE
+- Archive project.
+- Delete project.
+
+APPROVE
+- Approve project setup.
+
+Goal:
+User can create a project and see its production status.
+
+
+==============================================
+PHASE 2 - SOURCE VIDEO
+==============================================
+
+Input:
+YouTube URL
+
+Store metadata such as:
+- video ID
+- title
+- channel
+- duration
+- URL
+- thumbnail if needed
+
+User options:
+CREATE
+- Add source video.
+
+READ
+- View metadata.
+- Open original source.
+
+UPDATE
+- Replace URL/source.
+
+DELETE
+- Remove source.
+
+APPROVE
+- Approve source video.
+
+
+==============================================
+PHASE 3 - TIMESTAMPED TRANSCRIPT
+==============================================
+
+Pipeline:
+YouTube URL
+    ->
+Timestamped transcript
+
+Important:
+Preserve transcript timestamps from the beginning.
+
+Suggested structure:
+
+TranscriptChunk
+- start
+- end
+- text
+
+Example:
+[
+  {
+    "start": 12.4,
+    "end": 18.7,
+    "text": "Artificial intelligence is changing..."
+  }
+]
+
+User options:
+CREATE
+- Fetch transcript.
+- Generate transcript if required.
+
+READ
+- Read full transcript.
+- Search transcript.
+- View timestamps.
+
+UPDATE
+- Correct transcript text.
+- Adjust timestamps.
+- Refetch/regenerate transcript.
+
+DELETE
+- Delete transcript.
+
+APPROVE
+- Approve transcript.
+
+
+==============================================
+PHASE 4 - TRANSCRIPT ANALYSIS
+==============================================
+
+Goal:
+Convert long transcript into meaningful editorial sections.
+
+Stage A - Semantic segmentation:
+Group transcript into coherent topics.
+
+Possible fields:
+AnalysisSegment
+- start
+- end
+- topic
+- summary
+- claim
+- importance
+- controversy
+- reaction_potential
+- novelty
+- factual_claim_score
+- entertainment_value
+
+Stage B - Editorial analysis:
+Identify which sections are worth reacting to.
+
+User options:
+CREATE
+- Run analysis.
+- Generate segments.
+
+READ
+- View topics.
+- View summaries.
+- View claims.
+- View AI scoring.
+
+UPDATE
+- Reanalyse.
+- Change analysis instructions.
+- Change model.
+- Rename segment.
+- Split segment.
+- Merge segments.
+- Adjust timestamps.
+
+DELETE
+- Remove analysis.
+- Remove individual segment.
+
+APPROVE
+- Approve analysis.
+
+
+==============================================
+PHASE 5 - SELECT REACTION SEGMENTS
+==============================================
+
+Purpose:
+Choose which source-video sections will appear in the final video.
+
+User options:
+CREATE
+- Select segments.
+- Add segment manually.
+
+READ
+- Preview segment.
+- Read associated transcript.
+
+UPDATE
+- Reorder selected segments.
+- Change start/end timestamps.
+- Change priority.
+- Change selection.
+
+DELETE
+- Deselect/remove segment.
+
+APPROVE
+- Lock final selected-segment list.
+
+Goal:
+User has an explicit ordered list of source sections to react to.
+
+
+==============================================
+PHASE 6 - SCREEN CAPTURE JOBS
+==============================================
+
+PROJECT DECISION:
+Every selected source segment will be screen-recorded.
+
+Pipeline:
+Selected Segment
+    ->
+CaptureJob
+    ->
+Controlled browser
+    ->
+Open YouTube
+    ->
+Seek to timestamp
+    ->
+Start playback
+    ->
+Screen-record selected segment
+    ->
+Save raw recording
+    ->
+Trim/crop/normalize
+    ->
+Validate
+    ->
+Save final local source clip
+
+Suggested CaptureJob fields:
+- project
+- source_video
+- segment
+- requested_start
+- requested_end
+- capture_start
+- capture_end
+- status
+- raw_recording
+- processed_clip
+- duration
+- attempts
+- error_message
+
+Important:
+Use capture padding.
+
+Example:
+Useful content:
+05:12.4 -> 05:29.8
+
+Actual capture:
+05:11.0 -> 05:31.0
+
+Then trim accurately afterward.
+
+Possible capture components:
+- browser.py
+- screen_recorder.py
+- clip_processor.py
+- validator.py
+
+User options:
+CREATE
+- Create capture job.
+- Record segment.
+
+READ
+- View queue.
+- View status.
+- Preview raw recording.
+- Preview processed clip.
+
+UPDATE
+- Adjust timestamps.
+- Adjust capture padding.
+- Retry.
+- Re-record.
+- Trim.
+- Crop.
+- Normalize.
+- Resize.
+
+DELETE
+- Cancel capture.
+- Delete failed job.
+- Delete clip.
+
+APPROVE
+- Approve/lock successful source clip.
+
+Validation checks:
+- expected vs actual duration
+- video stream exists
+- audio stream exists
+- resolution is correct
+- no capture failure
+- file is playable
+
+Goal:
+URL + start/end timestamps reliably produces a clean local MP4.
+
+
+==============================================
+PHASE 7 - RESEARCH / FACT CHECK
+==============================================
+
+Purpose:
+Ground reaction content in evidence when appropriate.
+
+Research package may include:
+- source claim
+- supporting evidence
+- contradicting evidence
+- background context
+- uncertainties
+- references
+- useful statistics
+- historical context
+- counterarguments
+
+User options:
+CREATE
+- Generate research package.
+
+READ
+- View sources.
+- View findings.
+- View uncertainties.
+
+UPDATE
+- Add sources.
+- Remove sources.
+- Re-run research.
+- Change research focus.
+
+DELETE
+- Delete research package.
+
+APPROVE
+- Approve research context.
+
+Goal:
+Reaction content is not based only on generic AI opinion.
+
+
+==============================================
+PHASE 8 - REACTION BLOCK
+==============================================
+
+This is the core original-content unit.
+
+Structure:
+
+SOURCE CLIP
+    ->
+A. REFRAME
+    ->
+B. FOCUS
+    ->
+C. EVALUATE
+    ->
+D. MINI ESSAY
+    ->
+E. MINI CONCLUSION
+    ->
+F. OPTIONAL BRIDGE
+
+----------------------------------------------
+A. REFRAME
+----------------------------------------------
+
+Purpose:
+Repeat/reword what was just heard in clearer, shorter language.
+
+Rules:
+- Do not simply repeat the transcript.
+- Compress the source speaker's main claim.
+- Make the point easy to follow.
+
+User options:
+- Generate.
+- Read.
+- Edit.
+- Regenerate.
+- Remove.
+
+----------------------------------------------
+B. FOCUS
+----------------------------------------------
+
+Purpose:
+Identify exactly what we want to talk about.
+
+Example logic:
+"The important question here is not X. The real issue is Y."
+
+User options:
+- Generate.
+- Read.
+- Change angle.
+- Change question.
+- Edit.
+- Regenerate.
+- Remove.
+
+----------------------------------------------
+C. EVALUATE
+----------------------------------------------
+
+Purpose:
+React/review/criticize/agree/challenge.
+
+Suggested reaction types:
+- agree
+- disagree
+- mixed
+- fact_check
+- context
+- counterargument
+- clarification
+- challenge_assumption
+- alternative_interpretation
+
+User options:
+- Generate.
+- Choose reaction type.
+- Edit.
+- Change stance.
+- Regenerate.
+- Remove.
+
+----------------------------------------------
+D. MINI ESSAY
+----------------------------------------------
+
+Purpose:
+Create substantial original content and expand video length.
+
+Possible content:
+- explanation
+- historical context
+- examples
+- analogies
+- research
+- evidence
+- counterarguments
+- economic implications
+- future implications
+- alternative interpretations
+- recommendations
+- original analysis
+
+This should often be the longest part of the Reaction Block.
+
+Suggested length:
+45-120 seconds, configurable.
+
+User options:
+- Generate.
+- Read.
+- Edit.
+- Expand.
+- Shorten.
+- Increase depth.
+- Reduce depth.
+- Add evidence.
+- Add examples.
+- Change tone.
+- Regenerate.
+- Remove.
+
+----------------------------------------------
+E. MINI CONCLUSION
+----------------------------------------------
+
+Purpose:
+Summarize the takeaway from this specific segment.
+
+User options:
+- Generate.
+- Read.
+- Edit.
+- Regenerate.
+- Remove.
+
+----------------------------------------------
+F. OPTIONAL BRIDGE
+----------------------------------------------
+
+Purpose:
+Connect the current Reaction Block naturally to the next source segment.
+
+User options:
+- Generate.
+- Read.
+- Edit.
+- Regenerate.
+- Remove.
+
+----------------------------------------------
+REACTION BLOCK DATA MODEL
+----------------------------------------------
+
+Suggested fields:
+
+ReactionBlock
+- source_segment
+- source_claim
+- reframe
+- focus
+- reaction_type
+- reaction_text
+- mini_essay_thesis
+- mini_essay_script
+- conclusion
+- bridge
+- final_combined_script
+- status
+- approved_at
+- locked_at
+
+Important:
+Each subsection must be stored separately.
+
+This allows:
+- regenerate only Reframe
+- regenerate only Mini Essay
+- edit only Conclusion
+- preserve approved sections
+
+Recommended duration ratio:
+Source clip: ~20 sec
+Commentary: ~100 sec
+
+This creates roughly a 5:1 ratio of original commentary to source material.
+
+APPROVE
+- Approve/lock each subsection if desired.
+- Approve/lock full Reaction Block.
+
+
+==============================================
+PHASE 9 - OVERALL INTRO
+==============================================
+
+Generate after the major reaction points are known.
+
+Suggested intro structure:
+- hook
+- topic introduction
+- source-video context
+- why the topic matters
+- what the video will examine
+
+User options:
+CREATE
+- Generate intro.
+
+READ
+- Read intro.
+- Preview/listen after narration exists.
+
+UPDATE
+- Rewrite.
+- Shorten.
+- Expand.
+- Change hook.
+- Change tone.
+- Regenerate.
+
+DELETE
+- Remove intro.
+
+APPROVE
+- Approve/lock intro.
+
+
+==============================================
+PHASE 10 - OVERALL OUTRO
+==============================================
+
+Suggested outro structure:
+- overall conclusion
+- strongest takeaway
+- recommendations
+- unresolved questions
+- viewer takeaway
+- optional CTA
+
+User options:
+CREATE
+- Generate outro.
+
+READ
+- Read/listen.
+
+UPDATE
+- Rewrite.
+- Change recommendations.
+- Change CTA.
+- Shorten.
+- Expand.
+- Regenerate.
+
+DELETE
+- Remove outro.
+
+APPROVE
+- Approve/lock outro.
+
+
+==============================================
+PHASE 11 - VOICE LAB
+==============================================
+
+Purpose:
+Create/manage reusable narrator voices, including the user's cloned voice.
+
+Possible models:
+VoiceProfile
+- name
+- language
+- description
+- engine/model
+- created_at
+
+VoiceRecording
+- voice_profile
+- script_text
+- audio_file
+- duration
+- quality_score
+- approved
+
+VoiceSample
+- voice_profile
+- text
+- audio_file
+
+Recording workflow:
+Recording Script
+    ->
+User reads into microphone
+    ->
+Browser records audio
+    ->
+Quality check
+    ->
+Approve/re-record
+    ->
+Voice profile / reference dataset
+    ->
+Voice test
+    ->
+Approved narrator voice
+
+Training/recording prompts should cover:
+- statements
+- questions
+- short sentences
+- long sentences
+- numbers
+- dates
+- technical words
+- acronyms
+- skepticism
+- surprise
+- seriousness
+- enthusiasm
+- emphasis
+- transitions
+- intro delivery
+- outro delivery
+
+Possible narrator options:
+- cloned user voice
+- previous voice version
+- neutral AI voice
+- alternative voice profile
+
+User options:
+CREATE
+- Create voice profile.
+- Import reference recordings.
+- Record training prompts.
+
+READ
+- Listen to samples.
+- View profile.
+
+UPDATE
+- Change model/engine.
+- Change profile settings.
+- Add more recordings.
+- Rebuild/refine profile.
+
+DELETE
+- Archive voice.
+- Delete voice profile.
+
+APPROVE
+- Approve narrator voice.
+
+
+==============================================
+PHASE 12 - NARRATION GENERATION
+==============================================
+
+Generate narration from:
+- overall intro
+- each Reaction Block subsection
+- overall outro
+
+Keep narration modular.
+
+Example:
+intro.wav
+reaction_01_reframe.wav
+reaction_01_focus.wav
+reaction_01_evaluate.wav
+reaction_01_mini_essay.wav
+reaction_01_conclusion.wav
+reaction_01_bridge.wav
+outro.wav
+
+Suggested NarrationAsset fields:
+- source_text
+- voice_profile
+- audio_file
+- duration
+- speed
+- emotion
+- energy
+- emphasis
+- pauses
+- pronunciation settings
+
+User options:
+CREATE
+- Generate narration.
+
+READ
+- Listen.
+
+UPDATE
+- Change narrator voice.
+- Change speed.
+- Change energy.
+- Change emotion.
+- Change emphasis.
+- Change pauses.
+- Fix pronunciation.
+- Regenerate.
+
+DELETE
+- Delete bad take.
+- Delete narration asset.
+
+APPROVE
+- Approve/lock narration.
+
+Milestone:
+The whole video should be understandable by listening to narration + source clips,
+even before visuals are added.
+
+
+==============================================
+PHASE 13 - VISUAL DIRECTOR / ASSET PLAN
+==============================================
+
+Purpose:
+Decide what the viewer should see while narrator audio is playing.
+
+Important:
+Do not use one stock clip for an entire long narration section.
+
+Recommended:
+Visual change approximately every 3-7 seconds.
+
+Possible visual types:
+- stock_video
+- image
+- screenshot
+- chart
+- headline
+- text_graphic
+- source_freeze_frame
+- source_crop
+- source_zoom
+- web_page_capture
+- quote_graphic
+
+Example:
+Narration duration: 30 sec
+
+0-5 sec
+source-video freeze frame
+
+5-10 sec
+stock footage
+
+10-14 sec
+headline
+
+14-19 sec
+stock footage
+
+19-24 sec
+chart
+
+24-30 sec
+source-video crop/zoom
+
+The AI decides WHAT visual is needed.
+The media provider/service decides WHERE to obtain it.
+
+User options:
+CREATE
+- Generate shot-by-shot plan.
+
+READ
+- View visual plan.
+
+UPDATE
+- Change visual density.
+- Change timings.
+- Change asset type.
+- Replace visual instruction.
+- Regenerate plan.
+
+DELETE
+- Remove visual instruction.
+
+APPROVE
+- Approve visual plan.
+
+
+==============================================
+PHASE 14 - VISUAL ASSET MANAGER
+==============================================
+
+Asset categories:
+1. Stock footage
+2. Images
+3. Screenshots
+4. Charts
+5. Graphics
+6. Headlines
+7. Source freeze frames
+8. Source crops/zooms
+
+Stock footage workflow:
+Narration
+    ->
+AI generates visual concept
+    ->
+AI generates search query
+    ->
+Provider returns candidate assets
+    ->
+User/system selects best candidate
+    ->
+Trim/crop/normalize
+    ->
+Attach to visual slot
+
+User options for stock footage:
+CREATE
+- Search.
+- Add.
+
+READ
+- Preview candidates.
+
+UPDATE
+- Replace.
+- Trim.
+- Crop.
+- Reposition.
+- Change duration.
+
+DELETE
+- Remove.
+
+APPROVE
+- Approve selected footage.
+
+User options for images/screenshots:
+- Add/generate/select.
+- Preview.
+- Replace.
+- Crop.
+- Zoom.
+- Change duration.
+- Remove.
+- Approve.
+
+User options for charts/graphics:
+- Generate.
+- Preview.
+- Edit data.
+- Edit text.
+- Edit layout.
+- Replace.
+- Remove.
+- Approve.
+
+Goal:
+Every visual slot has a real approved asset.
+
+
+==============================================
+PHASE 15 - MASTER TIMELINE
+==============================================
+
+This is the central edit-decision structure.
+
+Overall sequence:
+
+INTRO
+
+SOURCE CLIP #1
+    ->
+REACTION BLOCK #1
+
+SOURCE CLIP #2
+    ->
+REACTION BLOCK #2
+
+SOURCE CLIP #3
+    ->
+REACTION BLOCK #3
+
+...
+
+OUTRO
+
+TimelineItem may contain:
+- order
+- type
+- start
+- duration
+- source file
+- narration audio
+- visual asset
+- transition
+- subtitle reference
+- audio settings
+
+Example:
+[
+  {
+    "type": "intro",
+    "audio": "intro.wav"
+  },
+  {
+    "type": "screen_recorded_source",
+    "file": "source_clip_001.mp4"
+  },
+  {
+    "type": "reaction",
+    "audio": "reaction_001.wav",
+    "visuals": [
+      "stock_01.mp4",
+      "chart_01.png"
+    ]
+  },
+  {
+    "type": "screen_recorded_source",
+    "file": "source_clip_002.mp4"
+  }
+]
+
+User options:
+CREATE
+- Auto-build timeline.
+- Add timeline item.
+
+READ
+- View full sequence.
+- Preview sections.
+
+UPDATE
+- Reorder.
+- Move.
+- Trim.
+- Extend.
+- Replace media.
+- Change duration.
+- Change transition.
+
+DELETE
+- Remove timeline item.
+
+APPROVE
+- Lock timeline.
+
+Goal:
+The complete video exists as structured timeline data before rendering.
+
+
+==============================================
+PHASE 16 - TRANSITIONS
+==============================================
+
+User options:
+CREATE
+- Add transitions.
+
+READ
+- Preview.
+
+UPDATE
+- Change transition type.
+- Change duration.
+
+DELETE
+- Remove.
+
+APPROVE
+- Approve transitions.
+
+
+==============================================
+PHASE 17 - SUBTITLES
+==============================================
+
+Use known narration scripts and audio timing where possible.
+
+User options:
+CREATE
+- Generate captions.
+
+READ
+- Preview captions.
+
+UPDATE
+- Correct text.
+- Adjust timing.
+- Change style.
+- Change positioning.
+
+DELETE
+- Remove subtitles.
+
+APPROVE
+- Approve subtitles.
+
+
+==============================================
+PHASE 18 - BACKGROUND MUSIC
+==============================================
+
+User options:
+CREATE
+- Add/select track.
+
+READ
+- Listen.
+
+UPDATE
+- Replace track.
+- Change volume.
+- Change start/end.
+- Change fade-in/fade-out.
+
+DELETE
+- Remove music.
+
+APPROVE
+- Approve music.
+
+
+==============================================
+PHASE 19 - AUDIO MIX
+==============================================
+
+Audio sources:
+- narrator voice
+- source-video audio
+- background music
+- optional sound effects
+
+Processing:
+- normalization
+- ducking
+- fade-in
+- fade-out
+- peak control
+- loudness control
+
+Example starting targets:
+Narration: around -16 LUFS
+Source clip: around -16 LUFS
+Background music under narration: much lower, e.g. around -30 LUFS
+
+These should be configurable.
+
+User options:
+CREATE
+- Generate mix.
+
+READ
+- Listen/watch preview.
+
+UPDATE
+- Change levels.
+- Change ducking.
+- Change normalization.
+- Adjust fades.
+- Rebuild mix.
+
+DELETE
+- Reset/remove mix.
+
+APPROVE
+- Approve audio mix.
+
+
+==============================================
+PHASE 20 - FINAL RENDERER
+==============================================
+
+Renderer:
+FFmpeg
+
+Input:
+Master Timeline
+
+Output:
+final_video.mp4
+
+Renderer responsibilities:
+- trim
+- crop
+- scale
+- resize
+- concatenate
+- overlay
+- transitions
+- audio mixing
+- subtitle burn-in if required
+- encode
+- export
+
+Example target:
+- MP4
+- H.264 video
+- AAC audio
+- 1920 x 1080
+- 30 fps
+
+User options:
+CREATE
+- Render final video.
+
+READ
+- Watch rendered video.
+
+UPDATE
+- Change render settings.
+- Re-render.
+
+DELETE
+- Delete old render.
+
+APPROVE
+- Approve final video.
+
+
+==============================================
+PHASE 21 - QUALITY CONTROL
+==============================================
+
+Automated QC checks should include:
+- missing assets
+- broken media
+- black frames
+- silent narration
+- missing source audio
+- incorrect duration
+- subtitle overflow
+- subtitle timing problems
+- timeline gaps
+- failed clips
+- wrong resolution
+- audio peaks
+- missing intro/outro
+- stale downstream assets after upstream changes
+
+User options:
+CREATE
+- Run QC.
+
+READ
+- View warnings/results.
+
+UPDATE
+- Fix issue.
+- Re-run QC.
+- Override warning.
+
+DELETE
+- Dismiss non-critical result.
+
+APPROVE
+- Approve QC.
+
+Goal:
+No video should be marked final with obvious production failures.
+
+
+==============================================
+PHASE 22 - FINAL YOUTUBE VIDEO
+==============================================
+
+This means:
+The actual complete rendered video file ready to upload.
+
+Example:
+final_video.mp4
+
+At this stage it should already contain:
+- all screen-recorded source segments
+- all Reaction Blocks
+- intro
+- outro
+- narrator voice
+- stock footage
+- graphics
+- screenshots
+- subtitles
+- music
+- mixed audio
+- transitions
+- final render
+
+User options:
+READ
+- Watch full final video.
+
+UPDATE
+- Reject and return to earlier stage.
+- Re-render.
+
+DELETE
+- Delete old version.
+- Archive previous version.
+
+APPROVE
+- Mark final video as upload-ready.
+
+
+==============================================
+PHASE 23 - YOUTUBE METADATA (OPTIONAL / LATER)
+==============================================
+
+Generate:
+- title
+- description
+- tags
+- chapters
+- hashtags if desired
+
+User options:
+CREATE
+- Generate metadata.
+
+READ
+- Review.
+
+UPDATE
+- Edit.
+- Regenerate individual fields.
+
+DELETE
+- Remove generated version.
+
+APPROVE
+- Approve metadata.
+
+
+==============================================
+PHASE 24 - THUMBNAIL (OPTIONAL / LATER)
+==============================================
+
+User options:
+CREATE
+- Generate/upload thumbnail.
+
+READ
+- Preview.
+
+UPDATE
+- Edit.
+- Replace.
+- Regenerate.
+
+DELETE
+- Delete.
+
+APPROVE
+- Approve thumbnail.
+
+
+==============================================
+PHASE 25 - YOUTUBE PUBLISHING (OPTIONAL / LATER)
+==============================================
+
+Publishing should remain separate from video creation.
+
+Pipeline:
+FINAL YOUTUBE VIDEO
+    ->
+QC APPROVED
+    ->
+TITLE / DESCRIPTION / TAGS / CHAPTERS
+    ->
+THUMBNAIL
+    ->
+UPLOAD
+    ->
+SCHEDULE / PUBLISH
+
+User options:
+CREATE
+- Upload video.
+- Schedule video.
+
+READ
+- View upload status.
+
+UPDATE
+- Change privacy.
+- Change schedule.
+- Change metadata.
+
+DELETE
+- Cancel draft upload.
+- Delete draft if supported.
+
+
+==============================================
+DEPENDENCY / INVALIDATION SYSTEM
+==============================================
+
+Important architectural rule:
+
+If an approved upstream object changes, dependent downstream objects may no longer
+be valid.
+
+Example:
+
+Changing Reaction Block #3 may invalidate:
+- Narration audio for Reaction Block #3
+- Visual plan
+- Visual assets
+- Subtitles
+- Timeline
+- Final render
+
+UX warning example:
+
+"Changing this Reaction Block will invalidate:
+- Narration audio
+- Visual plan
+- Subtitles
+- Timeline
+- Final render
+
+[Cancel]
+[Change and Regenerate Dependencies]"
+
+This dependency system should be built into the data model, not just shown in UI.
+
+
+==============================================
+RECOMMENDED DJANGO AREAS / SERVICES
+==============================================
+
+Possible high-level structure:
+
+youtube_content_creator/
+|
+|-- projects/
+|   |-- models.py
+|   |-- views.py
+|   |-- forms.py
+|   |-- services/
+|
+|-- pipeline/
+|   |-- transcript.py
+|   |-- analysis.py
+|   |-- segmentation.py
+|   |-- reaction.py
+|   |-- research.py
+|   |-- narration.py
+|   |-- visual_planner.py
+|   |-- timeline.py
+|   |-- renderer.py
+|
+|-- capture/
+|   |-- browser.py
+|   |-- screen_recorder.py
+|   |-- clip_processor.py
+|   |-- validator.py
+|
+|-- voice_lab/
+|   |-- models.py
+|   |-- recording.py
+|   |-- engines.py
+|
+|-- media_assets/
+|   |-- stock_media.py
+|   |-- images.py
+|   |-- graphics.py
+|   |-- charts.py
+|
+|-- rendering/
+|   |-- ffmpeg.py
+|   |-- subtitles.py
+|   |-- audio_mixer.py
+|
+|-- integrations/
+|   |-- youtube.py
+|   |-- llm.py
+|   |-- tts.py
+|   |-- stock_provider.py
+|
+|-- tasks.py
+
+
+==============================================
+KEY DATA MODELS
+==============================================
+
+Suggested models:
+- VideoProject
+- SourceVideo
+- TranscriptChunk
+- AnalysisSegment
+- SelectedSegment
+- CaptureJob
+- SourceClip
+- ResearchPackage
+- ReactionBlock
+- VoiceProfile
+- VoiceRecording
+- VoiceSample
+- NarrationAsset
+- VisualPlan
+- VisualAsset
+- Timeline
+- TimelineItem
+- SubtitleTrack
+- AudioMix
+- RenderJob
+- RenderedVideo
+- QCResult
+
+
+==============================================
+DEVELOPER IMPLEMENTATION MILESTONES
+==============================================
+
+MILESTONE 1
+URL -> transcript
+
+MILESTONE 2
+Transcript -> selected reaction segment
+
+MILESTONE 3
+Selected timestamp -> screen-recorded MP4
+
+MILESTONE 4
+Source clip -> complete Reaction Block
+
+MILESTONE 5
+Reaction Block -> narrator audio
+
+MILESTONE 6
+One source clip + one reaction -> finished mini video
+
+MILESTONE 7
+Multiple Reaction Blocks -> full timeline
+
+MILESTONE 8
+Full timeline -> finished YouTube MP4
+
+MILESTONE 9
+QC-approved upload-ready video
+
+MILESTONE 10
+Optional automated YouTube publishing
+
+
+==============================================
+MOST IMPORTANT EARLY PROOF OF CONCEPT
+==============================================
+
+Before building the complete production studio, create one vertical slice:
+
+One YouTube video
+    ->
+One selected source segment
+    ->
+Screen recording
+    ->
+One complete Reaction Block
+    ->
+Narrator voice
+    ->
+2-3 visual assets / B-roll clips
+    ->
+Subtitles
+    ->
+Audio mix
+    ->
+FFmpeg render
+    ->
+60-120 second finished MP4
+
+If this works well, most of the highest-risk technical assumptions are validated.
+
+After that, scale from:
+1 Reaction Block
+to:
+8-12 Reaction Blocks + Intro + Outro
+
+
+==============================================
+FINAL MASTER PIPELINE
+==============================================
+
+YOUTUBE URL
+    ->
+VIDEO PROJECT
+    ->
+SOURCE VIDEO METADATA
+    ->
+TIMESTAMPED TRANSCRIPT
+    ->
+TRANSCRIPT ANALYSIS
+    ->
+SEMANTIC SEGMENTATION
+    ->
+SELECT REACTION SEGMENTS
+    ->
+CREATE CAPTURE JOBS
+    ->
+SCREEN-RECORD EVERY SELECTED SEGMENT
+    ->
+VALIDATE / TRIM / CROP / NORMALIZE SOURCE CLIPS
+    ->
+RESEARCH / FACT-CHECK
+    ->
+GENERATE REACTION BLOCK FOR EACH SEGMENT
+    |
+    |-- REFRAME
+    |-- FOCUS
+    |-- EVALUATE
+    |-- MINI ESSAY
+    |-- MINI CONCLUSION
+    |-- OPTIONAL BRIDGE
+    ->
+GENERATE OVERALL INTRO
+    ->
+GENERATE OVERALL OUTRO
+    ->
+CHOOSE / CREATE NARRATOR VOICE
+    ->
+GENERATE NARRATION AUDIO
+    ->
+VISUAL DIRECTOR / SHOT PLAN
+    ->
+ACQUIRE VISUAL ASSETS
+    |
+    |-- STOCK FOOTAGE
+    |-- IMAGES
+    |-- SCREENSHOTS
+    |-- CHARTS
+    |-- HEADLINES
+    |-- GRAPHICS
+    |-- SOURCE FREEZE FRAMES
+    ->
+BUILD MASTER TIMELINE
+    ->
+ADD TRANSITIONS
+    ->
+GENERATE SUBTITLES
+    ->
+ADD BACKGROUND MUSIC
+    ->
+MIX / NORMALIZE AUDIO
+    ->
+FFMPEG FINAL RENDER
+    ->
+AUTOMATED QUALITY CONTROL
+    ->
+HUMAN REVIEW / APPROVAL
+    ->
+FINAL YOUTUBE VIDEO (UPLOAD-READY MP4)
+
+OPTIONAL EXTENSION:
+    ->
+GENERATE TITLE
+    ->
+GENERATE DESCRIPTION
+    ->
+GENERATE TAGS
+    ->
+GENERATE CHAPTERS
+    ->
+GENERATE / SELECT THUMBNAIL
+    ->
+UPLOAD / SCHEDULE / PUBLISH TO YOUTUBE
+
+
+==============================================
+CORE PRODUCT PRINCIPLE
+==============================================
+
+The application should not behave like:
+
+Press one button
+    ->
+AI makes everything
+    ->
+Finished
+
+It should behave like:
+
+AI generates first draft
+    ->
+User reviews
+    ->
+User edits / regenerates / replaces / removes
+    ->
+User approves / locks
+    ->
+Next stage
+    ->
+Final render
+
+This makes the system an AI-assisted Django video production workstation,
+not just a one-click generator.
