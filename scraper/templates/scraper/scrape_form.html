@@ -163,6 +163,75 @@
         .back-link:hover {
             text-decoration: underline;
         }
+
+        .saved-videos {
+            border-top: 1px solid #e0e0e0;
+            margin-top: 30px;
+            padding-top: 24px;
+        }
+
+        .saved-videos-header {
+            align-items: center;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .saved-videos h2 {
+            color: #333;
+            font-size: 18px;
+        }
+
+        .saved-video-link {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            color: #333;
+            display: block;
+            font-size: 14px;
+            margin-top: 8px;
+            padding: 11px 12px;
+            text-decoration: none;
+        }
+
+        .saved-video-link:hover {
+            background: #f5f6ff;
+            border-color: #667eea;
+        }
+
+        .saved-video-row {
+            align-items: center;
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .saved-video-row .saved-video-link {
+            flex: 1;
+            margin-top: 0;
+        }
+
+        .delete-transcript-button {
+            background: transparent;
+            border: 1px solid #c73838;
+            border-radius: 6px;
+            color: #b42323;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 10px 11px;
+        }
+
+        .delete-transcript-button:hover {
+            background: #fff0f0;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .empty-saved-videos {
+            color: #666;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -196,6 +265,28 @@
         </form>
 
         <div class="message" id="message"></div>
+
+        <section class="saved-videos" aria-labelledby="saved-videos-heading">
+            <div class="saved-videos-header">
+                <h2 id="saved-videos-heading">Saved transcripts</h2>
+                <a href="{% url 'scraped_video_list' %}" class="back-link" style="margin-top: 0;">View all</a>
+            </div>
+            {% if scraped_videos %}
+                {% for video in scraped_videos %}
+                    <div class="saved-video-row">
+                        <a href="{% url 'transcript_detail' video.pk %}" class="saved-video-link">
+                            {{ video.video_title }}
+                        </a>
+                        <form method="post" action="{% url 'delete_transcript' video.pk %}">
+                            {% csrf_token %}
+                            <button class="delete-transcript-button" type="submit" onclick="return confirm('Delete this saved transcript?');">Delete</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p class="empty-saved-videos">No transcripts saved yet.</p>
+            {% endif %}
+        </section>
 
         <a href="/" class="back-link">← Back to Dashboard</a>
     </div>
@@ -236,6 +327,7 @@
                 if (response.ok && data.success) {
                     showMessage(data.message, 'success');
                     videoUrlInput.value = '';
+                    window.setTimeout(() => window.location.reload(), 500);
                 } else {
                     showMessage(data.error || 'An error occurred', 'error');
                 }

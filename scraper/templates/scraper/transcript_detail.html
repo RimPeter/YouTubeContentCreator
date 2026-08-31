@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcript {{ scraped_video.video_title }}</title>
+    <style>
+        body { background: #f4f5fb; color: #252525; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 32px 20px; }
+        main { margin: 0 auto; max-width: 860px; }
+        a { color: #4e5fca; font-weight: 600; text-decoration: none; }
+        h1 { font-size: 24px; margin: 18px 0 6px; }
+        .source { color: #686d7a; display: block; font-size: 14px; margin-bottom: 24px; overflow-wrap: anywhere; }
+        .entries { background: #fff; border: 1px solid #e0e2ec; border-radius: 8px; }
+        article { border-bottom: 1px solid #e9eaf0; display: grid; gap: 16px; grid-template-columns: 78px 1fr; padding: 16px 18px; }
+        article:last-child { border-bottom: 0; }
+        time { color: #4e5fca; font-family: monospace; font-size: 13px; font-weight: 700; }
+        p { font-size: 15px; line-height: 1.55; margin: 0; }
+        .delete-form { margin-top: 24px; }
+        .delete-button { background: #c73838; border: 0; border-radius: 5px; color: #fff; cursor: pointer; font: inherit; font-weight: 600; padding: 10px 14px; }
+        .delete-button:hover { background: #a92020; }
+        @media (max-width: 520px) { article { gap: 6px; grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <main>
+        <a href="{% url 'scraped_video_list' %}">Back to saved transcripts</a>
+        <h1>{{ scraped_video.video_title }}</h1>
+        <a class="source" href="{{ scraped_video.youtube_url }}" target="_blank" rel="noopener">{{ scraped_video.youtube_url }}</a>
+        <section class="entries" aria-label="Transcript entries">
+            {% for entry in entries %}
+                <article>
+                    <time>{{ entry.start_seconds|floatformat:1 }}s</time>
+                    <p>{{ entry.text }}</p>
+                </article>
+            {% empty %}
+                <article><p>No transcript entries were saved.</p></article>
+            {% endfor %}
+        </section>
+        <form class="delete-form" method="post" action="{% url 'delete_transcript' scraped_video.pk %}">
+            {% csrf_token %}
+            <button class="delete-button" type="submit" onclick="return confirm('Delete this saved transcript?');">Delete Transcript</button>
+        </form>
+    </main>
+</body>
+</html>
