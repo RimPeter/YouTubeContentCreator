@@ -1,5 +1,5 @@
 Django==6.1
-django-allauth==0.65.19
+django-allauth==65.19.1
 django-unfold==0.104.1
 youtube-transcript-api==1.2.4
 asgiref==3.12.1
