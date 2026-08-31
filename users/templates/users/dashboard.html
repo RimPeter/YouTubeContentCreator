@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }}</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'users/styles.css' %}">
+</head>
+<body>
+    <div class="container">
+        {% include "users/navbar.html" %}
+
+        <div class="topbar" style="display: none;">
+            <h1>{{ page_title }}</h1>
+        </div>
+
+        <div class="stats">
+            <div class="card">
+                <div class="label">Projects</div>
+                <div class="value">{{ stats.projects }}</div>
+            </div>
+            <div class="card">
+                <div class="label">Drafts</div>
+                <div class="value">{{ stats.drafts }}</div>
+            </div>
+            <div class="card">
+                <div class="label">Ready to Render</div>
+                <div class="value">{{ stats.ready_to_render }}</div>
+            </div>
+            <div class="card">
+                <div class="label">Queued Jobs</div>
+                <div class="value">{{ stats.queued_jobs }}</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">Recent projects</h2>
+            {% if projects %}
+                <ul class="project-list">
+                    {% for project in projects %}
+                        <li class="project-item">
+                            <strong>{{ project.title }}</strong>
+                            <div class="muted">{{ project.status }}</div>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No projects yet. Create your first YouTube reaction video workflow.</p>
+            {% endif %}
+
+            <div class="button-row">
+                <a class="button" href="/admin/">Open Admin</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

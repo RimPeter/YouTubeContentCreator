@@ -1,0 +1,49 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'users/styles.css' %}">
+<style>
+    body {
+        margin: 0;
+        background: #f4f7fb;
+    }
+
+    #container {
+        margin-top: 0;
+    }
+
+    .login #container {
+        display: block;
+    }
+
+    .login #content {
+        max-width: 500px;
+        margin: 40px auto 0;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        padding: 24px;
+    }
+
+    .login .submit-row {
+        padding-top: 16px;
+    }
+
+    .login .submit-row input {
+        background: #2563eb;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block branding %}
+{% include "users/navbar.html" %}
+{% endblock %}
