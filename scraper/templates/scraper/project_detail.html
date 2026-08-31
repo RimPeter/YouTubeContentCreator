@@ -1,0 +1,230 @@
+{% extends "scraper/base.html" %}
+
+{% block title %}{{ project.title }} - YouTube Content Creator{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h1>{{ project.title }}</h1>
+        <div class="mt-2">
+            <span class="badge badge-status badge-{{ project.status }} me-2">
+                {{ project.get_status_display }}
+            </span>
+            {% if project.locked_at %}
+                <small class="text-muted">Locked {{ project.locked_at|date:"M d, Y" }}</small>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-md-4 text-end">
+        <div class="btn-group" role="group">
+            <a href="{% url 'scraper_project_list' %}" class="btn btn-outline-secondary">
+                ← Back
+            </a>
+            <form method="post" action="{% url 'scraper_project_delete' project.pk %}" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger"
+                        onclick="return confirm('Delete this project?')">
+                    🗑️ Delete
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <!-- Project Overview -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">📋 Project Overview</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">Status</dt>
+                    <dd class="col-sm-9">
+                        <span class="badge badge-status badge-{{ project.status }}">
+                            {{ project.get_status_display }}
+                        </span>
+                    </dd>
+                    
+                    <dt class="col-sm-3">Pipeline Stage</dt>
+                    <dd class="col-sm-9">{{ project.current_pipeline_stage }}</dd>
+                    
+                    <dt class="col-sm-3">Created</dt>
+                    <dd class="col-sm-9">{{ project.created_at|date:"M d, Y H:i" }}</dd>
+                    
+                    <dt class="col-sm-3">Updated</dt>
+                    <dd class="col-sm-9">{{ project.updated_at|date:"M d, Y H:i" }}</dd>
+                    
+                    {% if project.description %}
+                        <dt class="col-sm-3">Description</dt>
+                        <dd class="col-sm-9">{{ project.description }}</dd>
+                    {% endif %}
+                </dl>
+            </div>
+        </div>
+
+        <!-- Source Video -->
+        {% if source_video %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">🎥 Source Video</h5>
+                </div>
+                <div class="card-body">
+                    {% if source_video.thumbnail_url %}
+                        <img src="{{ source_video.thumbnail_url }}" class="img-fluid mb-3 rounded" style="max-width: 200px;">
+                    {% endif %}
+                    
+                    <dl class="row mb-0">
+                        <dt class="col-sm-3">Title</dt>
+                        <dd class="col-sm-9">{{ source_video.title }}</dd>
+                        
+                        <dt class="col-sm-3">Channel</dt>
+                        <dd class="col-sm-9">{{ source_video.channel }}</dd>
+                        
+                        <dt class="col-sm-3">Video ID</dt>
+                        <dd class="col-sm-9">
+                            <code>{{ source_video.youtube_video_id }}</code>
+                        </dd>
+                        
+                        <dt class="col-sm-3">Duration</dt>
+                        <dd class="col-sm-9">
+                            {% if source_video.duration %}
+                                {{ source_video.duration }}s ({{ source_video.duration|add:0|divisibleby:60|yesno:"–" }})
+                            {% else %}
+                                Unknown
+                            {% endif %}
+                        </dd>
+                        
+                        <dt class="col-sm-3">Transcript</dt>
+                        <dd class="col-sm-9">
+                            {% if source_video.transcript_fetched %}
+                                <span class="badge bg-success">✓ Available</span>
+                                <span class="badge bg-info">{{ chunk_count }} chunks</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">Pending</span>
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Transcript Actions -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">📝 Transcript Management</h5>
+                </div>
+                <div class="card-body">
+                    {% if not source_video.transcript_fetched %}
+                        <form method="post" action="{% url 'scraper_project_fetch' project.pk %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                🔄 Fetch Transcript from YouTube
+                            </button>
+                        </form>
+                        <p class="text-muted mt-2">Click to extract the transcript from the YouTube video</p>
+                    {% else %}
+                        <div class="mb-3">
+                            <p class="alert alert-success">
+                                ✓ Transcript fetched successfully
+                            </p>
+                        </div>
+                        
+                        <a href="{% url 'scraper_transcript_view' project.pk %}" class="btn btn-primary me-2">
+                            👁️ View Transcript
+                        </a>
+                        
+                        <form method="post" action="{% url 'scraper_project_approve' project.pk %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-success me-2">
+                                ✓ Approve Transcript
+                            </button>
+                        </form>
+                        
+                        <a href="{% url 'api_project_export' project.pk %}" class="btn btn-outline-secondary">
+                            📥 Export JSON
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+        {% else %}
+            <div class="alert alert-warning">
+                ⚠️ No source video configured for this project
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-md-4">
+        <!-- Quick Stats -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">📊 Quick Stats</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="h4 mb-0">{{ chunk_count }}</div>
+                        <small class="text-muted">Chunks</small>
+                    </div>
+                    <div class="col-6">
+                        <div class="h4 mb-0">{{ project.status|upper }}</div>
+                        <small class="text-muted">Status</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Next Steps -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📍 Next Steps</h5>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    {% if not source_video.transcript_fetched %}
+                        <div class="list-group-item bg-transparent">
+                            <strong>1. Fetch Transcript</strong><br>
+                            <small class="text-muted">Extract the audio transcript</small>
+                        </div>
+                        <div class="list-group-item bg-transparent text-muted">
+                            <small>2. Review Transcript</small><br>
+                            <small>Check for accuracy</small>
+                        </div>
+                        <div class="list-group-item bg-transparent text-muted">
+                            <small>3. Analyze Segments</small><br>
+                            <small>Identify key moments</small>
+                        </div>
+                    {% elif project.status == 'transcript_ready' %}
+                        <div class="list-group-item bg-transparent">
+                            <strong>✓ 1. Fetch Transcript</strong><br>
+                            <small class="text-muted">Completed</small>
+                        </div>
+                        <div class="list-group-item bg-transparent">
+                            <strong>2. Review Transcript</strong><br>
+                            <small class="text-muted">Check for accuracy</small>
+                        </div>
+                        <div class="list-group-item bg-transparent text-muted">
+                            <small>3. Analyze Segments</small><br>
+                            <small>Identify key moments</small>
+                        </div>
+                    {% else %}
+                        <div class="list-group-item bg-transparent">
+                            <strong>✓ 1. Fetch Transcript</strong><br>
+                            <small class="text-muted">Completed</small>
+                        </div>
+                        <div class="list-group-item bg-transparent">
+                            <strong>✓ 2. Review Transcript</strong><br>
+                            <small class="text-muted">Completed</small>
+                        </div>
+                        <div class="list-group-item bg-transparent text-muted">
+                            <small>3. Analyze Segments</small><br>
+                            <small>Identify key moments</small>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "scraper/base.html" %}
+
+{% block title %}Create Project - YouTube Content Creator{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mb-4">
+    <div class="col-md-8">
+        <h1>➕ Create New Project</h1>
+        <p class="text-muted">Start a new YouTube reaction video production project</p>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body p-4">
+                <form method="post">
+                    {% csrf_token %}
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.project_title.id_for_label }}" class="form-label">
+                            Project Title
+                        </label>
+                        {{ form.project_title }}
+                        {% if form.project_title.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.project_title.errors.0 }}
+                            </div>
+                        {% endif %}
+                        <small class="text-muted">Give your project a descriptive name</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.youtube_url.id_for_label }}" class="form-label">
+                            YouTube URL
+                        </label>
+                        {{ form.youtube_url }}
+                        {% if form.youtube_url.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.youtube_url.errors.0 }}
+                            </div>
+                        {% endif %}
+                        <small class="text-muted">
+                            Paste the URL of the YouTube video you want to create a reaction to
+                        </small>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            Create Project & Continue
+                        </button>
+                    </div>
+                    
+                    <hr class="my-4">
+                    
+                    <p class="text-muted text-center mb-0">
+                        <a href="{% url 'scraper_project_list' %}" class="text-reset">
+                            ← Back to Projects
+                        </a>
+                    </p>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-8">
+        <div class="alert alert-info">
+            <h5>💡 What happens next?</h5>
+            <ol class="mb-0">
+                <li>Your project is created as a <strong>draft</strong></li>
+                <li>Click <strong>"Fetch Transcript"</strong> to extract the YouTube transcript</li>
+                <li>Review and edit the transcript chunks</li>
+                <li>Continue through the pipeline: analysis → segments → rendering</li>
+            </ol>
+        </div>
+    </div>
+</div>
+{% endblock %}

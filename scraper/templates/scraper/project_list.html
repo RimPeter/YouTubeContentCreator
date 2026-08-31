@@ -1,0 +1,78 @@
+{% extends "scraper/base.html" %}
+
+{% block title %}Projects - YouTube Content Creator{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h1>🎬 Video Projects</h1>
+        <p class="text-muted">{{ total_projects }} project{{ total_projects|pluralize }}</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <a href="{% url 'scraper_project_create' %}" class="btn btn-primary btn-lg">
+            ➕ New Project
+        </a>
+    </div>
+</div>
+
+{% if projects %}
+    <div class="row">
+        {% for project in projects %}
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">{{ project.title }}</h5>
+                        <span class="badge badge-status badge-{{ project.status }}">
+                            {{ project.get_status_display }}
+                        </span>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">{{ project.description|truncatewords:20 }}</p>
+                        
+                        {% if project.source_video %}
+                            <div class="mb-3">
+                                <small class="text-muted">Source Video</small><br>
+                                <small>{{ project.source_video.title }}</small><br>
+                                <small class="text-muted">{{ project.source_video.channel }}</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <span class="badge bg-info">
+                                    {{ project.source_video.transcript_chunks.count }} chunks
+                                </span>
+                                {% if project.source_video.transcript_fetched %}
+                                    <span class="badge bg-success">✓ Transcript</span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        
+                        <small class="text-muted">
+                            Updated: {{ project.updated_at|date:"M d, Y H:i" }}
+                        </small>
+                    </div>
+                    <div class="card-footer bg-dark border-top border-secondary">
+                        <a href="{% url 'scraper_project_detail' project.pk %}" class="btn btn-sm btn-outline-primary">
+                            View Details
+                        </a>
+                        <form method="post" action="{% url 'scraper_project_delete' project.pk %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-danger" 
+                                    onclick="return confirm('Delete this project?')">
+                                Delete
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-info text-center py-5">
+        <h4>No projects yet</h4>
+        <p>Create your first project to get started!</p>
+        <a href="{% url 'scraper_project_create' %}" class="btn btn-primary">
+            Create First Project
+        </a>
+    </div>
+{% endif %}
+{% endblock %}
