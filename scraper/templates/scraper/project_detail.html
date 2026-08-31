@@ -4,6 +4,7 @@
 <h1>{{ project.title }}</h1>
 <p>Status: {{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</p>
 {% if project.description %}<p>{{ project.description }}</p>{% endif %}
+<p><a class="button" href="{% url 'analysis:project_dashboard' project.pk %}">Transcript analysis</a></p>
 
 {% if project.content_is_mutable %}
     <p><a class="button" href="{% url 'project_update' project.pk %}">Edit project</a></p>

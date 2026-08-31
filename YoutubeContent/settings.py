@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "users",
     "scraper",
+    "analysis",
 
     "django.contrib.sites",
     "allauth",

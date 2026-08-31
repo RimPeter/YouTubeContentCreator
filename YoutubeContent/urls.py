@@ -10,6 +10,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("accounts/profile/", profile, name="profile"),
+    path("analysis/", include("analysis.urls")),
     path("projects/", scraper_views.project_list, name="project_list"),
     path("projects/create/", scraper_views.project_create, name="project_create"),
     path("projects/<int:pk>/", scraper_views.project_detail, name="project_detail"),

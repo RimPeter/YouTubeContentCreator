@@ -1,0 +1,58 @@
+{% extends "scraper/base.html" %}
+{% block title %}Analysis · {{ project.title }}{% endblock %}
+{% block content %}
+<h1>Transcript analysis</h1>
+<p><a href="{% url 'project_detail' project.pk %}">{{ project.title }}</a></p>
+<p>Status: {{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</p>
+
+{% if project.status != "approved" or project.is_locked %}
+<div class="card">Analysis and selection require an approved, unlocked project.</div>
+{% endif %}
+
+<section>
+    <h2>Source videos</h2>
+    {% for source in sources %}
+    <article class="card">
+        <h3>{{ source.title }}</h3>
+        <p>{{ source.transcript_chunks.count }} transcript chunks</p>
+        {% if project.status == "approved" and not project.is_locked %}
+        <form method="post" action="{% url 'analysis:run_analysis' source.pk %}">
+            {% csrf_token %}
+            {{ configuration_form.as_p }}
+            <button type="submit">Run new analysis</button>
+        </form>
+        {% endif %}
+        <h4>Runs</h4>
+        <ul>
+        {% for run in source.analysis_runs.all %}
+            <li>
+                <a href="{% url 'analysis:run_detail' run.pk %}">Version {{ run.version }}</a>
+                — {{ run.get_status_display }}
+                {% if run.used_fallback %} · fallback{% endif %}
+                {% if run.is_stale_for_display %} · stale{% endif %}
+            </li>
+        {% empty %}<li>No analysis runs.</li>{% endfor %}
+        </ul>
+    </article>
+    {% empty %}<p>No source videos.</p>{% endfor %}
+</section>
+
+<section class="card">
+    <h2>Ordered selected segments</h2>
+    {% if selections %}
+    <form method="post" action="{% url 'analysis:reorder_selections' project.pk %}">
+        {% csrf_token %}
+        <ol>
+        {% for selection in selections %}
+            <li>
+                <input type="number" min="1" max="{{ selections|length }}" name="position_{{ selection.pk }}" value="{{ selection.order }}" style="width:5rem;display:inline">
+                {{ selection.analysis_segment.title }}
+                <span class="muted">({{ selection.analysis_segment.analysis_run.source_video.title }})</span>
+            </li>
+        {% endfor %}
+        </ol>
+        {% if project.status == "approved" and not project.is_locked %}<button type="submit">Update order</button>{% endif %}
+    </form>
+    {% else %}<p>No selected segments.</p>{% endif %}
+</section>
+{% endblock %}

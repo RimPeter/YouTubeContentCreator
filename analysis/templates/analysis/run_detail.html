@@ -1,0 +1,45 @@
+{% extends "scraper/base.html" %}
+{% block title %}Analysis v{{ run.version }} · {{ run.source_video.title }}{% endblock %}
+{% block content %}
+<h1>{{ run.source_video.title }} — analysis v{{ run.version }}</h1>
+<p><a href="{% url 'analysis:project_dashboard' run.source_video.project.pk %}">Back to project analysis</a></p>
+<p>
+    {{ run.get_status_display }}
+    {% if run.used_fallback %} · deterministic fallback{% endif %}
+    {% if is_stale %} · stale{% endif %}
+</p>
+{% if run.error_message %}<p class="muted">{{ run.error_message }}</p>{% endif %}
+<p>Source fingerprint: <code>{{ run.source_fingerprint }}</code></p>
+<p>
+    Sort: <a href="?sort=source">source order</a> ·
+    <a href="?sort=score">score</a>
+</p>
+
+{% for row in segment_rows %}
+<article class="card">
+    <h2>#{{ row.segment.order }} {{ row.segment.title }}</h2>
+    <p>
+        Chunks {{ row.segment.start_chunk.sequence }}–{{ row.segment.end_chunk.sequence }} ·
+        {{ row.segment.start_seconds|floatformat:2 }}–{{ row.segment.end_seconds|floatformat:2 }}s ·
+        score {{ row.segment.aggregate_score }}
+    </p>
+    <p>{{ row.segment.summary }}</p>
+    <details><summary>Source text</summary><p>{{ row.segment.source_text }}</p></details>
+    <p><strong>Labels:</strong> {{ row.segment.topic_labels|join:", " }}</p>
+    <p><strong>Scores:</strong> {{ row.segment.component_scores }}</p>
+    <p><strong>Rationale:</strong> {{ row.segment.rationale }}</p>
+    {% if run.source_video.project.status == "approved" and not run.source_video.project.is_locked and not is_stale %}
+        <form method="post" action="{% url 'analysis:select_segment' row.segment.pk %}">
+            {% csrf_token %}
+            {{ row.form.as_p }}
+            <button type="submit">{% if row.selection %}Update selection{% else %}Select segment{% endif %}</button>
+        </form>
+        {% if row.selection %}
+        <form method="post" action="{% url 'analysis:deselect_segment' row.selection.pk %}">
+            {% csrf_token %}<button class="danger" type="submit">Deselect</button>
+        </form>
+        {% endif %}
+    {% endif %}
+</article>
+{% empty %}<p>No segments were persisted for this run.</p>{% endfor %}
+{% endblock %}
