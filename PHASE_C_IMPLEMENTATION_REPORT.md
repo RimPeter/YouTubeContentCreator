@@ -6,7 +6,7 @@ Date: 2026-08-31
 
 Phase C's production artifact and job foundation is implemented in the `production` Django app. The schema, storage boundaries, validation adapter, lifecycle services, dependency invalidation, retention command, admin integration, and deterministic tests are complete.
 
-The code gate passes. The local tool-health gate is pending because `ffprobe` is not installed or is not available on `PATH`. Phase D must not start until `python manage.py check_production_health` passes with the configured executable.
+Gate C passes. FFmpeg/FFprobe 9.0.1 was installed through Windows Package Manager using the hash-verified `Gyan.FFmpeg` package, and the live production health check now succeeds.
 
 ## Schema
 
@@ -58,14 +58,19 @@ The code gate passes. The local tool-health gate is pending because `ffprobe` is
 - `python manage.py check`: passed.
 - `python manage.py test production`: 28 tests passed.
 - `python manage.py test`: 72 tests passed after all Phase C migrations and approval-lineage hardening.
-- `python manage.py check_production_health`: fails safely with `ffprobe_unavailable` in the current local environment.
+- `ffmpeg -version`: passed with FFmpeg 9.0.1 full build.
+- `ffprobe -version`: passed with FFprobe 9.0.1 full build.
+- `python manage.py check_production_health`: passed against the configured `FileSystemStorage` and live FFprobe executable.
+- `python manage.py test production`: 28 tests passed again after the live tool installation.
 
 ## Next permitted action
 
-Install FFmpeg/FFprobe or set `FFPROBE_EXECUTABLE` to an existing trusted binary, then run:
+Gate C is unblocked. A terminal or IDE process that was already open during installation may need to be restarted so it inherits the updated user `PATH`. Confirm with:
 
 ```powershell
+ffmpeg -version
+ffprobe -version
 python manage.py check_production_health
 ```
 
-Only after that command passes may Phase D begin with an authorized local source file and deterministic clip trimming. Automated download or browser capture is not authorized by Phase C.
+Phase D may now begin with an authorized local source file and deterministic clip trimming. Automated download or browser capture is not authorized by Phase C.
