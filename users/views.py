@@ -1,22 +1,13 @@
 from django.shortcuts import render
+from django.contrib.auth.decorators import login_required
 
 
 def dashboard(request):
-    """Display the main landing dashboard for the creator app."""
-    projects = []
-    stats = {
-        "projects": len(projects),
-        "drafts": 0,
-        "ready_to_render": 0,
-        "queued_jobs": 0,
-    }
+    """Render the main dashboard/homepage."""
+    return render(request, 'users/dashboard.html')
 
-    return render(
-        request,
-        "users/dashboard.html",
-        {
-            "projects": projects,
-            "stats": stats,
-            "page_title": "Creator Dashboard",
-        },
-    )
+
+@login_required(login_url='account_login')
+def profile(request):
+    """Render the user profile page."""
+    return render(request, 'users/profile.html', {'user': request.user})
