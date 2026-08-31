@@ -301,3 +301,184 @@ class ModelIntegrationTests(TestCase):
         self.assertTrue(updated_source.transcript_fetched)
         self.assertEqual(processed_chunks.count(), 3)
 
+
+class TranscriptServiceTests(TestCase):
+    """Test cases for TranscriptService."""
+    
+    def setUp(self):
+        """Create a test project and source video."""
+        self.project = VideoProject.objects.create(
+            title="Service Test Project",
+            status='draft'
+        )
+        self.source_video = SourceVideo.objects.create(
+            project=self.project,
+            youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            youtube_video_id="dQw4w9WgXcQ",
+            title="Test Video",
+            channel="Test Channel"
+        )
+    
+    def test_extract_video_id_watch_format(self):
+        """Test extracting video ID from watch?v=ID format."""
+        from .services import TranscriptService
+        
+        urls = [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+        ]
+        
+        for url in urls:
+            video_id = TranscriptService.extract_video_id(url)
+            self.assertEqual(video_id, "dQw4w9WgXcQ")
+    
+    def test_extract_video_id_shorts_format(self):
+        """Test extracting video ID from /shorts/ID format."""
+        from .services import TranscriptService
+        
+        url = "https://www.youtube.com/shorts/dQw4w9WgXcQ"
+        video_id = TranscriptService.extract_video_id(url)
+        self.assertEqual(video_id, "dQw4w9WgXcQ")
+    
+    def test_extract_video_id_embed_format(self):
+        """Test extracting video ID from /embed/ID format."""
+        from .services import TranscriptService
+        
+        url = "https://www.youtube.com/embed/dQw4w9WgXcQ"
+        video_id = TranscriptService.extract_video_id(url)
+        self.assertEqual(video_id, "dQw4w9WgXcQ")
+    
+    def test_extract_video_id_youtu_be_format(self):
+        """Test extracting video ID from youtu.be short URL format."""
+        from .services import TranscriptService
+        
+        url = "https://youtu.be/dQw4w9WgXcQ"
+        video_id = TranscriptService.extract_video_id(url)
+        self.assertEqual(video_id, "dQw4w9WgXcQ")
+    
+    def test_extract_video_id_invalid_url(self):
+        """Test that invalid URLs raise an error."""
+        from .services import TranscriptService, TranscriptExtractionError
+        
+        invalid_urls = [
+            "https://example.com/watch?v=invalid",
+            "not a url",
+            "https://youtube.com/invalid",
+        ]
+        
+        for url in invalid_urls:
+            with self.assertRaises(TranscriptExtractionError):
+                TranscriptService.extract_video_id(url)
+    
+    def test_save_to_database(self):
+        """Test saving transcript chunks to database."""
+        from .services import TranscriptService
+        
+        transcript = [
+            {'start': 0.0, 'duration': 5.0, 'text': 'First chunk'},
+            {'start': 5.0, 'duration': 5.0, 'text': 'Second chunk'},
+            {'start': 10.0, 'duration': 5.0, 'text': 'Third chunk'},
+        ]
+        
+        chunk_count = TranscriptService.save_to_database(self.source_video, transcript)
+        
+        self.assertEqual(chunk_count, 3)
+        self.assertTrue(self.source_video.transcript_fetched)
+        self.assertEqual(self.source_video.transcript_status, 'completed')
+        
+        # Verify chunks were saved
+        chunks = self.source_video.transcript_chunks.all()
+        self.assertEqual(chunks.count(), 3)
+        
+        # Verify chunk data
+        first_chunk = chunks.get(sequence=1)
+        self.assertEqual(first_chunk.text, 'First chunk')
+        self.assertEqual(first_chunk.start, 0.0)
+    
+    def test_save_to_database_clears_existing(self):
+        """Test that saving new transcript clears old chunks."""
+        from .services import TranscriptService
+        
+        # Create initial chunks
+        transcript1 = [
+            {'start': 0.0, 'duration': 5.0, 'text': 'Old chunk 1'},
+            {'start': 5.0, 'duration': 5.0, 'text': 'Old chunk 2'},
+        ]
+        TranscriptService.save_to_database(self.source_video, transcript1)
+        self.assertEqual(self.source_video.transcript_chunks.count(), 2)
+        
+        # Save new transcript
+        transcript2 = [
+            {'start': 0.0, 'duration': 5.0, 'text': 'New chunk'},
+        ]
+        TranscriptService.save_to_database(self.source_video, transcript2)
+        
+        # Old chunks should be deleted
+        self.assertEqual(self.source_video.transcript_chunks.count(), 1)
+        self.assertEqual(
+            self.source_video.transcript_chunks.first().text,
+            'New chunk'
+        )
+    
+    def test_export_to_json(self):
+        """Test exporting transcript to JSON file."""
+        from .services import TranscriptService
+        import tempfile
+        import json
+        
+        # Create transcript
+        transcript = [
+            {'start': 0.0, 'duration': 5.0, 'text': 'First chunk'},
+            {'start': 5.0, 'duration': 5.0, 'text': 'Second chunk'},
+        ]
+        TranscriptService.save_to_database(self.source_video, transcript)
+        
+        # Export to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            export_path = f.name
+        
+        from pathlib import Path
+        export_path = Path(export_path)
+        
+        try:
+            result_path = TranscriptService.export_to_json(self.source_video, export_path)
+            
+            # Verify file exists and contains correct data
+            self.assertTrue(result_path.exists())
+            
+            with open(result_path, 'r') as f:
+                data = json.load(f)
+            
+            self.assertEqual(len(data), 2)
+            self.assertEqual(data[0]['text'], 'First chunk')
+            self.assertEqual(data[1]['text'], 'Second chunk')
+        finally:
+            # Clean up
+            if export_path.exists():
+                export_path.unlink()
+    
+    def test_process_video_workflow(self):
+        """Test the complete process_video workflow (without real API)."""
+        from .services import TranscriptService
+        from unittest.mock import patch
+        
+        # Mock the YouTube API call
+        mock_transcript = [
+            {'start': 0.0, 'duration': 3.0, 'text': 'Hello'},
+            {'start': 3.0, 'duration': 3.0, 'text': 'World'},
+        ]
+        
+        with patch.object(TranscriptService, 'fetch_transcript', return_value=mock_transcript):
+            result = TranscriptService.process_video(self.source_video)
+        
+        self.assertTrue(result['success'])
+        self.assertEqual(result['video_id'], 'dQw4w9WgXcQ')
+        self.assertEqual(result['chunks_saved'], 2)
+        
+        # Verify state
+        updated_source = SourceVideo.objects.get(pk=self.source_video.pk)
+        self.assertTrue(updated_source.transcript_fetched)
+        self.assertEqual(updated_source.transcript_status, 'completed')
+        self.assertEqual(updated_source.transcript_chunks.count(), 2)
+
