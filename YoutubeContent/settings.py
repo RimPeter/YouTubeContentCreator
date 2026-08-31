@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -40,6 +41,7 @@ INSTALLED_APPS = [
     "users",
     "scraper",
     "analysis",
+    "production",
 
     "django.contrib.sites",
     "allauth",
@@ -124,6 +126,29 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+# Phase C production-pipeline limits. Deployments may override these values.
+PRODUCTION_MAX_UPLOAD_BYTES = int(
+    os.environ.get("PRODUCTION_MAX_UPLOAD_BYTES", 500 * 1024 * 1024)
+)
+PRODUCTION_ALLOWED_MEDIA_EXTENSIONS = (
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".webm",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".aac",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+)
+FFPROBE_EXECUTABLE = os.environ.get("FFPROBE_EXECUTABLE", "ffprobe")
+FFPROBE_TIMEOUT_SECONDS = int(os.environ.get("FFPROBE_TIMEOUT_SECONDS", 15))
 SITE_ID = 1
 
 # Email
