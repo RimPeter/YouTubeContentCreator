@@ -1,0 +1,468 @@
+YOUTUBE CONTENT CREATOR — CONSOLIDATION AND REVISION PLAN FOR CODEX
+Repository: https://github.com/RimPeter/YouTubeContentCreator
+
+PURPOSE
+Restore the project-oriented domain model as the canonical architecture, retain the useful scrape-history behavior added later, migrate existing data safely, restore one transcript service layer, and prove the consolidated system with migrations and integration tests. Only after consolidation is complete may work begin on AI transcript analysis.
+
+VERIFIED REPOSITORY BASELINE (2026-08-31; RECHECK BEFORE EDITING)
+- Branch main is at a9e8bc9 and matches origin/main, but the working tree contains substantial user-owned edits and deletions. Preserve them; do not restore, discard, or overwrite them implicitly.
+- Commit 2d9e9c2 is a useful snapshot of the project-oriented tree, but its own diff is not the implementation. The substantive project/model/service work is in preceding commits including 9ce8493, 44bb646, f51c9e4, and 37fe8e1. Use history as evidence, not as code to revert wholesale.
+- Migration 0001 created VideoProject, SourceVideo, and TranscriptChunk. Migration 0002 copied that data into ScrapedVideo/TranscriptEntry and then deleted the canonical tables. Migration 0003 added ScrapedVideo.video_title.
+- The active database is SQLite. At the recorded baseline, scraper migrations 0001-0003 are applied and the local database contains 1 ScrapedVideo and 254 TranscriptEntry rows. Recount immediately before migration work; these numbers are evidence, not hard-coded expectations.
+- The recorded baseline passes six tests, python manage.py check, python manage.py makemigrations --check --dry-run, and python manage.py migrate --plan with no pending operations.
+- The working-tree requirements.txt is empty and the tracked README/environment examples are currently deleted. Do not assume the environment is reproducible merely because commands work in the currently activated Python installation. Restore or intentionally reconstruct a minimal dependency manifest only with the user's approval and without discarding unrelated edits.
+
+RESOLVED PRODUCT AND DOMAIN DECISIONS
+These decisions remove ambiguity from the historical prototype and are authoritative for Phase 1:
+1. A VideoProject has zero or more SourceVideo records. SourceVideo.project is a ForeignKey, not a OneToOneField. A project can therefore hold multiple source transcripts, and all imported legacy videos can belong to one imported project.
+2. A canonical YouTube video may appear once per project and may appear in different projects. Enforce UniqueConstraint(project, youtube_video_id); do not make youtube_video_id globally unique.
+3. Every user-created VideoProject has a required owner ForeignKey to settings.AUTH_USER_MODEL with on_delete=PROTECT so deleting an account cannot silently destroy projects. Ordinary users may access and mutate only their own projects and sources. Staff/superusers may inspect all projects; any broader collaboration model is out of scope.
+4. Legacy rows have no owner. The data migration creates or reuses one deterministic inactive system account with reserved username __legacy_transcript_import__ and an unusable password, owns one deterministic "Imported transcript history" project with it, and attaches imported SourceVideo rows to that project. Add the swappable user-model migration dependency. A preflight check must fail before canonical writes if that username is already occupied by an incompatible account. Staff must be able to inspect and explicitly reassign the imported project after migration. Never guess an owner from unrelated users.
+5. Workflow stage and locking are orthogonal. VideoProject has a status chosen from draft, transcript_ready, approved, archived, and failed, plus is_locked and the timestamps approved_at, archived_at, and locked_at. Do not encode locking as a status. Do not infer any state from timestamps alone.
+6. Allowed stage transitions are: draft -> transcript_ready or archived; transcript_ready -> draft, approved, failed, or archived; failed -> draft or archived; approved -> archived. Moving to transcript_ready or approved requires at least one SourceVideo and requires every attached source to have completed ingestion with at least one chunk. Archived is terminal in Phase 1. Approval is not silently reversible in Phase 1.
+7. Lock is permitted only for an approved, non-archived project. Explicit unlock is permitted to the owner or staff through a POST endpoint, but unlocking does not undo approval. Archiving requires an unlocked project, so a locked project must be explicitly unlocked first. Archived projects cannot be locked or unlocked.
+8. Content mutation (project content fields, adding/deleting sources, ingestion, and transcript replacement) is allowed only while the project is unapproved, unlocked, and unarchived. Workflow endpoints enforce their own transition rules. Ordinary deletion of a project or source is forbidden when the project is approved, locked, or archived. Draft/transcript-ready/failed unlocked projects may be deleted with explicit POST confirmation; project deletion intentionally cascades to its sources and chunks.
+9. In Phase 2, analysis and selection require an approved but unlocked, non-archived project. Locking represents a frozen reviewed result. This rule may be changed only by an explicit product decision and corresponding tests.
+10. Import provenance is durable. SourceVideo includes a nullable, unique legacy_scraped_video_id field until legacy retirement is verified. A dedicated LegacyImportConflict model/table records migration batch/version, legacy identifiers, severity (warning or error), reason code, and structured detail. Migration conflicts and normalization warnings must not exist only in logs.
+
+TARGET ARCHITECTURE
+VideoProject
+  -> zero or more SourceVideo
+       -> TranscriptChunk
+       -> AnalysisSegment (Phase 2 only)
+
+Canonical ownership rules:
+1. VideoProject is the user-facing unit of work.
+2. SourceVideo represents one YouTube source belonging to a VideoProject.
+3. TranscriptChunk stores ordered transcript text and timing for one SourceVideo.
+4. ScrapedVideo and TranscriptEntry are transitional legacy models, not the final domain model.
+5. TranscriptService is the only application service that fetches, normalizes, deduplicates, and persists source-video transcript data.
+6. HTTP views and management commands must use TranscriptService; they must not duplicate transcript-fetching or persistence logic.
+7. VideoProject owns authorization and lifecycle state; SourceVideo and TranscriptChunk inherit both through their project relationship.
+
+SCOPE
+In scope:
+- Restore VideoProject, SourceVideo, and TranscriptChunk as canonical models.
+- Restore project create/read/update/list behavior and approval, lock, archive, and delete workflow.
+- Preserve video-title retrieval, duplicate detection, and saved-transcript list/detail/delete behavior.
+- Safely migrate data from ScrapedVideo and TranscriptEntry into the canonical schema.
+- Restore TranscriptService and route all transcript ingestion through it.
+- Add model, service, migration, view, command, workflow, and integration tests.
+- Run Django migration and system validation commands.
+- Define, but do not start prematurely, the AI-analysis phase.
+
+Out of scope for the consolidation phase:
+- LLM provider integration.
+- Embeddings, vector databases, semantic search, or background-job infrastructure unless already present and required to keep existing behavior working.
+- Video rendering, narration generation, reaction-block generation, or publishing.
+- Unrelated UI redesigns or dependency upgrades.
+
+NON-NEGOTIABLE CONSTRAINTS
+1. Preserve existing user data. Never delete ScrapedVideo or TranscriptEntry tables before a verified forward data migration and a tested rollback/retention strategy exist.
+2. Use additive migrations first. Separate schema creation, data migration, application cutover, and legacy-model removal into distinct migrations/commits.
+3. Do not rewrite or squash migrations already applied in shared environments.
+4. Do not silently merge ambiguous records. Record migration conflicts deterministically and make the migration idempotent or otherwise safe under Django migration semantics.
+5. Preserve stable public URLs where practical. If URL names must change, keep redirects or compatibility aliases and test them.
+6. Preserve approval/locking invariants. Approved or locked projects and their protected content must not be mutated through ordinary edit/ingestion paths.
+7. Avoid business logic in views, templates, models' save methods, or management commands when it belongs in TranscriptService.
+8. Make the smallest coherent changes necessary. Do not begin Phase 2 until every Phase 1 gate passes.
+9. Treat every pre-existing uncommitted change as user-owned. Before editing, capture git status and the relevant diffs. Never use reset, checkout, clean, or a broad restore to obtain historical code.
+10. Use a deployment-safe expand/migrate/cutover/contract sequence. A migration being reversible in a test database does not by itself make an application rollback safe after new canonical writes have begun.
+11. Do not depend on the currently installed global environment. Confirm and document the dependency manifest and supported Python version before claiming reproducibility.
+
+EXECUTION METHOD
+Complete tasks in order. At every DO NOT PROCEED gate, stop immediately if a condition fails. Report the failure, relevant command output, affected files, and the smallest proposed correction. Do not bypass a gate by weakening or deleting tests.
+
+PHASE 0 — INVENTORY AND BASELINE
+
+Task 0.1: Inspect repository state.
+- Confirm the active branch, working-tree status, recent commits, Django settings module, installed apps, database backend, Python version, and dependency manager.
+- Locate manage.py, the scraper app, all migrations, models, services, views, URL configurations, templates, management commands, and tests.
+- Search the current tree and relevant history for VideoProject, SourceVideo, TranscriptChunk, TranscriptService, ScrapedVideo, and TranscriptEntry.
+- Inspect the project-oriented snapshot at 2d9e9c2, the substantive preceding implementation commits, and the simplifying replacement a9e8bc9. Treat commit identifiers as leads and verify them locally; distinguish a commit's snapshot from the files changed by that commit.
+- Compare old and current model fields, constraints, URLs, templates, workflow rules, service behavior, and tests. Reuse sound prior code selectively; do not blindly revert the branch.
+- Record the exact current model/table state and current migration graph before editing.
+- Record legacy row counts, per-video entry counts and sequence ranges, null/empty values, duplicate-normalized IDs, and timestamp ranges with read-only reconciliation queries.
+- Record the current dependency manifest state. If it is empty or intentionally edited, stop and obtain approval before reconstructing it; do not silently replace a user edit with the committed version.
+
+Task 0.2: Establish a baseline.
+- Run the existing test suite and Django checks using the repository's documented environment.
+- Run: python manage.py makemigrations --check
+- Run: python manage.py migrate --plan
+- Run: python manage.py check
+- Capture pre-existing failures separately from regressions introduced by this work.
+
+DO NOT PROCEED GATE 0
+Do not edit models or migrations until:
+- The actual migration graph and database backend are known.
+- The relationship between model names and physical table names is documented.
+- Existing uncommitted user changes are identified and protected.
+- A baseline test/check result has been recorded.
+- It is clear whether 2d9e9c2 and a9e8bc9 exist and what relevant code they contain.
+- Source multiplicity, ownership, lifecycle, deletion, locking, and import-provenance decisions match the RESOLVED PRODUCT AND DOMAIN DECISIONS above, or an explicitly approved amendment has been recorded.
+- The test environment is reproducible from a reviewed dependency manifest, or the environment limitation is explicitly reported as a blocking Gate 0 failure.
+
+PHASE 1A — CANONICAL DOMAIN MODEL
+
+Task 1.1: Restore VideoProject.
+File-level target: scraper/models.py or the actual models package discovered in Phase 0.
+- Reuse sound historical fields selectively, but implement the resolved lifecycle rather than copying the prototype's mutually exclusive approved/locked statuses.
+- Include owner (on_delete=PROTECT), stable identity, title, description, expected duration where still used, status, is_locked, created_at, updated_at, approved_at, archived_at, and locked_at.
+- Add explicit transition/domain methods or a dedicated project workflow service that atomically validates transitions and keeps status/boolean fields and timestamps consistent.
+- Preserve existing field names where needed for migration and compatibility.
+- Enforce the resolved mutation, locking, archive, and deletion invariants server-side. Generic ModelForms must not expose status, is_locked, or lifecycle timestamps for arbitrary assignment.
+
+Task 1.2: Restore SourceVideo.
+- Add a required ForeignKey to VideoProject with related_name='source_videos' and on_delete=CASCADE. This is intentionally one project to many source videos.
+- Store normalized YouTube identity separately from the submitted URL. Prefer a canonical video_id for duplicate detection.
+- Preserve source URL, retrieved title, timestamps, and any ingestion/status metadata already used by the application.
+- Add nullable unique legacy_scraped_video_id for durable import provenance. It is not user-editable and is populated only by the legacy migration.
+- Define UniqueConstraint(fields=['project', 'youtube_video_id'], ...), allowing the same video in different projects.
+- Add indexes used by duplicate lookup and saved-transcript listing.
+
+Task 1.3: Restore TranscriptChunk.
+- Add a required relationship to SourceVideo.
+- Store ordered text plus timing information supported by the existing transcript source (for example start and duration/end).
+- Preserve source ordering with an explicit sequence/index field.
+- Add a uniqueness constraint that prevents duplicate chunk positions for a SourceVideo.
+- Use numeric types compatible with the actual legacy floats. Keep timing required unless inventory discovers a real persisted legacy representation without timing; do not invent nullable timing solely for hypothetical records.
+
+Task 1.4: Add domain validation.
+- Validate empty/invalid video IDs, invalid timing, and invalid state transitions.
+- Ensure ownership and locked/approved/archive rules are enforced in the service/domain layer and relevant HTTP endpoints.
+- Do not rely solely on disabled UI controls for protection.
+- Remember that model validation is not automatically invoked by save() or bulk_create(); critical invariants require service checks and database constraints in addition to clean()/form validation.
+
+Task 1.5: Create the additive schema migration.
+File-level target: scraper/migrations/NNNN_restore_canonical_models.py (actual number/name determined by migration graph).
+- Create canonical tables and constraints without dropping legacy tables.
+- If historical canonical migrations still exist, reconcile state using normal Django migration techniques; do not create duplicate tables.
+- Review generated operations manually before applying them.
+- Add LegacyImportConflict in this expand migration or a separate additive migration before data import. Its records must survive application cutover and remain queryable by staff/admin.
+
+DO NOT PROCEED GATE 1A
+Do not create the data migration until:
+- Canonical schema creation is additive and does not remove legacy data.
+- Model constraints match verified workflow behavior.
+- Migration graph has no conflicts.
+- makemigrations --check reports no unintended model drift after the intended migration is created.
+
+PHASE 1B — SAFE LEGACY DATA MIGRATION
+
+Task 1.6: Define deterministic mapping from ScrapedVideo/TranscriptEntry.
+Use historical models from apps.get_model inside RunPython; never import live model classes in a migration.
+
+Default mapping, subject to verified fields:
+- Each legacy ScrapedVideo maps to one SourceVideo.
+- Each legacy TranscriptEntry maps to exactly one TranscriptChunk because the verified legacy schema is already timestamped and chunked.
+- Create/reuse the deterministic inactive legacy-import system account with an unusable password and one deterministic "Imported transcript history" project owned by it. Attach all legacy SourceVideo rows to that project. Record the reserved account identifier and provide a staff-only reassignment procedure; do not infer ownership.
+- Copy the submitted/canonical URL, canonical video ID, title, transcript text, timing, and timestamps wherever corresponding data exists.
+- Populate SourceVideo.legacy_scraped_video_id from the legacy primary key. Preserve provenance until the compatibility window and production-like reconciliation are complete.
+- Preserve SourceVideo created_at/updated_at from ScrapedVideo and TranscriptChunk created_at from TranscriptEntry using historical-model update operations where auto_now/auto_now_add would otherwise replace them.
+- Set the imported project to transcript_ready only if at least one SourceVideo imports successfully and every imported source has at least one valid chunk; otherwise leave it draft. Never infer approved, archived, failed, or locked state from legacy scrape completion.
+- Preserve a nonblank legacy title exactly. For a blank legacy title, use the canonical video ID as a neutral display fallback and create a durable blank_title_fallback conflict/warning record so the normalization is auditable.
+
+Task 1.7: Handle duplicates safely.
+- Normalize YouTube URLs/video IDs with migration-local frozen logic equivalent to TranscriptService rather than importing changeable runtime code. Treat the stored legacy youtube_video_id as provenance, validate its exact 11-character format, and compare it with any ID extractable from youtube_url. A mismatch is a durable conflict, not permission to guess which value is correct.
+- Determine duplicate groups before inserting.
+- Merge only exact, provably equivalent duplicates. Preserve the most complete title/source metadata and a deterministic transcript choice.
+- The verified legacy model already enforces global uniqueness on youtube_video_id. Test normal schema-valid input first. Treat duplicates that can exist only through out-of-band database corruption as corruption fixtures, created through explicitly documented SQL only when that database backend permits it.
+- For conflicting transcripts, invalid/ambiguous IDs, or provenance collisions, retain the legacy rows unchanged, create a durable LegacyImportConflict row, and skip only the unsafe canonical insert. Never silently discard or overwrite a row. Logs may supplement but never replace the conflict table.
+- Ensure rerunning migration logic in tests cannot create extra canonical rows.
+- Make reruns resolve by legacy_scraped_video_id and use update-or-verify semantics. A rerun encountering a different canonical mapping must create a conflict rather than remap silently.
+
+Task 1.8: Preserve timestamps and state.
+- Where auto_now/auto_now_add would overwrite legacy timestamps, use migration-safe update operations after creation.
+- Map legacy deletion/archive flags only when semantics are verified. Do not infer approval or lock status from scrape completion.
+
+Task 1.9: Write forward and reverse behavior.
+File-level target: a separate data migration after canonical schema creation.
+- Forward migration copies data and verifies expected counts.
+- Prefer a safe data-migration reverse that deletes only SourceVideo/TranscriptChunk rows proven by legacy_scraped_video_id to have been created by this migration, deletes only its own conflict records, and deletes the deterministic imported project only if it contains no unrelated data. Retain the inactive reserved account on reverse because deleting a swappable historical user can traverse third-party relations from incompatible migration states; document later operational cleanup instead.
+- If a genuinely safe reverse is impossible, use an explicit irreversible migration with a clear reason, retain legacy tables, and test/document restore procedure before proceeding.
+- Do not drop ScrapedVideo or TranscriptEntry in this migration.
+- Treat reversal of the preceding canonical schema migration as unsafe once runtime cutover permits new canonical writes, because it would drop those new rows. Document the rollback boundary: before cutover, migration reversal may be used if tested; after cutover, roll forward or restore a verified backup instead of blindly migrating backward.
+
+Task 1.10: Add migration tests before production cutover.
+- Migrate a test database to the legacy state.
+- Insert representative legacy rows using historical models.
+- Migrate forward and assert project, video, chunks, titles, URLs, timing, ordering, timestamps, duplicate behavior, and row counts.
+- Cover empty transcript (a ScrapedVideo with no entries), blank title, Unicode, long transcript text, non-contiguous but unique sequence values, URL/video-ID mismatch, invalid/corrupt IDs, and durable conflict recording.
+- Do not claim to test an "untimed full transcript" through historical models: the verified TranscriptEntry schema requires start_seconds and duration_seconds and contains one timed chunk per row. Test out-of-band malformed data only through clearly identified backend-specific fixtures, or document it as impossible in the supported legacy schema.
+- Test reverse behavior if reversible.
+- Assert imported ownership, provenance IDs, timestamps, project grouping, and that legacy tables and rows are byte-for-byte/logically unchanged by the forward migration.
+
+DO NOT PROCEED GATE 1B
+Do not switch HTTP views or remove legacy models until:
+- Migration tests pass.
+- No representative legacy row loses transcript text or identity.
+- Duplicate and conflict behavior is deterministic and documented.
+- Canonical counts reconcile with legacy input according to the mapping rules.
+- Legacy tables remain intact.
+- Every skipped or ambiguous legacy row has a durable conflict record that is visible to reconciliation/admin tooling.
+- The post-cutover rollback boundary and backup/restore procedure are documented; migration reversibility alone is not accepted as a rollback plan.
+
+PHASE 1C — RESTORE TRANSCRIPT SERVICE AS SINGLE SERVICE LAYER
+
+Task 1.11: Restore and consolidate TranscriptService.
+File-level target: reuse the verified prior service module, likely scraper/services.py or scraper/services/transcript_service.py.
+- Define one public ingestion operation accepting an authorized project and submitted YouTube URL/video ID. Authorization may be checked before service entry, but the service must still enforce project lifecycle/mutation rules.
+- Centralize URL/video-ID normalization, duplicate detection, metadata/title retrieval, transcript fetching, transcript normalization, canonical persistence, and transaction boundaries.
+- Return a clear result object or documented values that distinguish created, duplicate, and failed outcomes.
+- Raise typed/domain-specific exceptions for invalid input, duplicate source, unavailable transcript, remote fetch failure, and locked/archived project.
+- Wrap canonical persistence in transaction.atomic so partial SourceVideo/chunk writes are rolled back.
+- Use bulk_create for chunks where appropriate while preserving order.
+- Make external YouTube/title/transcript clients injectable or mockable.
+- Match the installed youtube-transcript-api interface documented by the reviewed dependency version; the historical service used an older call shape and must not be copied blindly.
+- Ensure duplicate detection is backed by a database constraint; handle race-condition IntegrityError cleanly.
+- Do not make HTTP request objects, messages, redirects, stdout, or command styling part of the service.
+
+Task 1.12: Preserve video-title retrieval.
+- Reuse the verified current title-fetching behavior behind the service.
+- Define fallback behavior when title retrieval fails (for example, retain a known title or use a neutral fallback based on video ID) without losing the transcript.
+- Test title success, missing title, malformed response, and transient failure.
+
+Task 1.13: Preserve duplicate detection.
+- Detect equivalent YouTube URL forms by canonical video ID.
+- Scope duplicates within the project, matching UniqueConstraint(project, youtube_video_id).
+- Return a user-friendly duplicate outcome without creating additional video/chunk rows.
+- Test sequential duplicates and simulated concurrent uniqueness conflicts.
+
+DO NOT PROCEED GATE 1C
+Do not rewire views or commands until TranscriptService tests prove:
+- Successful ingestion persists exactly one SourceVideo and ordered chunks.
+- Failures do not leave partial records.
+- Duplicate URL variants are detected.
+- Title retrieval behavior is preserved.
+- Locked/archived restrictions are enforced.
+
+PHASE 1D — HTTP, COMMAND, AND WORKFLOW CUTOVER
+
+Task 1.14: Restore project CRUD and lifecycle workflow.
+File-level targets: scraper/views.py or view modules, scraper/urls.py, project forms, and project templates.
+- Restore project list, detail, create, and update behavior from verified prior code.
+- Restore explicit approve, lock, unlock, archive, and delete actions using the resolved transition rules. Do not copy historical direct status assignment.
+- Confirm authorization, HTTP method, CSRF, confirmation, and state-transition rules for every mutating endpoint.
+- Scope ordinary project/source querysets to request.user ownership. Staff/superusers may use an explicitly tested broader queryset. Return 404 or the chosen consistent denial response without leaking other users' objects.
+- Apply the resolved deletion semantics: unlocked draft/transcript_ready/failed projects may be explicitly deleted and cascade to sources/chunks; approved, locked, and archived projects and their sources cannot be deleted through ordinary endpoints.
+- Preserve user-facing status and validation messages.
+
+Task 1.15: Route HTTP ingestion directly through TranscriptService.
+- Views validate request/form input and permissions, call TranscriptService directly, translate typed service outcomes into messages/status/redirects, and do no transcript persistence themselves.
+- Remove duplicate transcript/title/URL parsing logic from views.
+- Use POST for ingestion and deletion.
+- Do not call a management command from an HTTP view. Do not expose raw exception text, stderr, tracebacks, or remote-service details in JSON responses.
+
+Task 1.16: Preserve saved transcript list/detail/delete.
+- Rebase list/detail pages on SourceVideo and TranscriptChunk.
+- List only authorized SourceVideo rows and show video title, canonical/source URL, project, and saved timestamp as supported by existing UI.
+- Detail renders chunks in deterministic sequence and reconstructs readable transcript text.
+- Delete applies verified lifecycle rules and removes the SourceVideo and its chunks atomically, without deleting its VideoProject.
+- Preserve useful current URL names/templates or add compatibility redirects.
+- Eliminate runtime reads/writes to ScrapedVideo and TranscriptEntry after cutover.
+
+Task 1.17: Route management commands through TranscriptService.
+File-level target: scraper/management/commands/*.py.
+- Each ingestion command parses arguments, resolves/creates the intended VideoProject and owner according to explicit command options, calls TranscriptService, and formats results. Never silently choose the first user or project.
+- Commands must not fetch titles/transcripts or create SourceVideo/TranscriptChunk directly.
+- Preserve useful existing CLI behavior where compatible.
+- Return non-zero/CommandError for actual failures and a documented outcome for duplicates.
+
+Task 1.18: Update admin, forms, templates, and imports.
+- Register canonical models appropriately in Django admin.
+- Replace legacy model imports throughout application code and tests.
+- Remove stale template references and ensure navigation exposes projects and saved transcripts coherently.
+- Keep legacy model definitions available only as long as required for staged deployment/data verification; mark them transitional and prevent new writes.
+- Register LegacyImportConflict and import provenance read-only in admin. Provide staff-visible reconciliation and imported-project reassignment instructions; do not expose the inactive system account as an ordinary selectable owner without warning.
+
+Task 1.18A: Execute an explicit deployment sequence.
+- Expand release: deploy additive canonical schema and conflict/provenance support while the old runtime can still operate. Do not remove legacy tables or require canonical reads in this release.
+- Migrate/reconcile: back up the target database, run the data migration on a production-like copy, inspect conflicts and counts, then run it in the target environment during the documented write-control window.
+- Cutover release: deploy runtime code that writes and reads only canonical models. Prevent all new legacy writes. Monitor reconciliation throughout the compatibility window.
+- Contract release: only after Gate 1E, optionally remove legacy models/tables and temporary provenance. This is a separate release and is not required for functional consolidation.
+- For each release, document which prior application version remains compatible with the resulting schema. Never assume separate commits automatically provide a safe deploy sequence.
+
+DO NOT PROCEED GATE 1D
+Do not remove legacy models/tables until:
+- All runtime reads and writes use canonical models.
+- Views and commands call TranscriptService rather than duplicating its behavior.
+- Project CRUD and lifecycle integration tests pass.
+- Saved transcript list/detail/delete integration tests pass.
+- A migrated legacy dataset works through the new UI and service paths.
+- Cross-user project/source access is denied and tested; staff behavior is explicit.
+- Expand, migration, cutover, and post-cutover rollback/run-forward procedures are documented for the actual deployment environment.
+
+PHASE 1E — TEST MATRIX AND LEGACY RETIREMENT
+
+Task 1.19: Add comprehensive tests.
+Use the project's established test framework and layout. Cover at minimum:
+
+Model tests:
+- Relationships, ordering, constraints, cascades/protection, string representations, and timestamps.
+- Project approval, locking, archiving, mutation restrictions, and invalid transitions.
+- Duplicate SourceVideo and duplicate TranscriptChunk constraints.
+- One-to-many project/source behavior, required ownership, imported provenance uniqueness, status/timestamp consistency, and orthogonality of approval state and is_locked.
+
+Service tests:
+- URL normalization for supported YouTube URL variants.
+- Successful title/transcript fetch and persistence.
+- Duplicate detection and uniqueness-race handling.
+- Missing/unavailable transcript, invalid URL, API/client errors, empty transcript, and title fallback.
+- Transaction rollback after failure.
+- Locked/archived project behavior.
+
+View tests:
+- Project CRUD and authorization.
+- Approve/lock/archive/delete workflow, including invalid transitions and HTTP method enforcement.
+- Ingestion success, duplicate, validation error, remote failure, and locked-project behavior.
+- Saved transcript list, detail ordering/content, delete confirmation/action, and compatibility redirects.
+- Assert the service is called by ingestion views; do not overmock integration tests.
+- Cross-user list/detail/mutation denial, staff access, imported-project visibility/reassignment behavior, and absence of raw exception leakage.
+
+Management-command tests:
+- Assert commands call TranscriptService.
+- Success, duplicate, invalid project/input, remote failure, and exit behavior.
+
+Migration tests:
+- Legacy-to-canonical mappings and edge cases specified in Phase 1B.
+- Count reconciliation and preservation of text/title/timing/identity.
+- Deterministic inactive import owner/project, provenance, conflict persistence, idempotent rerun behavior, and selective reverse behavior where supported.
+
+End-to-end integration scenario:
+1. Create two users and create a project owned by the first user.
+2. Ingest two videos into that project through an HTTP endpoint with external calls stubbed at the client boundary, proving the one-to-many relationship.
+3. Verify titles, SourceVideo rows, and ordered TranscriptChunk records.
+4. Verify the authorized saved list and detail pages and denial for the second user.
+5. Attempt a duplicate URL variant within the project and verify no duplicate rows; ingest the same canonical video into a different project and verify it is allowed.
+6. Approve then lock the project and verify prohibited edits, deletion, and ingestion fail. Explicitly unlock and verify approval still prevents content mutation.
+7. Archive according to the resolved workflow and verify archive is terminal in Phase 1.
+8. Separately verify deletion cascades for an eligible unlocked, unapproved source and project.
+
+Task 1.20: Retire legacy models only after deployment-safe verification.
+- Search the entire repository for ScrapedVideo and TranscriptEntry references.
+- References may remain only in historical migrations and explicitly named migration tests/compatibility documentation.
+- Create a separate migration to remove legacy model state/tables only after a backup and migrated-data verification procedure is documented and executed for the target environment.
+- If deployment cannot include an expand/migrate/contract sequence safely, leave legacy tables in place and unused; removal is not required for functional consolidation.
+- Do not remove legacy_scraped_video_id or LegacyImportConflict merely to make the canonical schema look cleaner. Retain them through the compatibility window and any required audit period; removal requires its own reviewed migration and archived reconciliation report.
+
+DO NOT PROCEED GATE 1E
+Do not drop legacy tables merely to make searches clean. Proceed only when:
+- A recoverable database backup exists for non-test environments.
+- Forward migration has run successfully on a production-like copy.
+- Reconciliation queries show expected mappings and no unhandled conflicts.
+- The application has operated using only canonical models through the planned compatibility window.
+
+PHASE 1 FINAL VERIFICATION
+
+Run from the repository's documented environment, using the correct settings:
+1. python manage.py makemigrations --check
+2. python manage.py migrate
+3. python manage.py check
+4. python manage.py test
+
+Also run repository-specific lint/type/format checks if configured. Do not introduce a new formatter or rewrite unrelated files.
+
+Verify the environment from a clean virtual environment using the reviewed dependency manifest. If dependency reconstruction remains unapproved or incomplete, Phase 1 cannot be reported fully reproducible even if commands pass in the developer's existing environment.
+
+If the project uses pytest, run its documented full suite in addition to or instead of manage.py test only if that is the established test entry point. The four requested Django commands must still be accounted for; report any command that is genuinely inapplicable and why.
+
+PHASE 1 ACCEPTANCE CRITERIA
+All criteria are mandatory:
+- VideoProject -> SourceVideo -> TranscriptChunk is the canonical persisted hierarchy.
+- VideoProject supports multiple SourceVideo rows, owns authorization through a required owner, and enforces project-scoped canonical video uniqueness.
+- Existing ScrapedVideo/TranscriptEntry data is migrated without silent loss.
+- Legacy video titles, URLs/video IDs, transcript content, timing/order, and relevant timestamps are preserved when present.
+- Duplicate detection works across equivalent YouTube URL forms and is protected by a database constraint.
+- Saved transcript list, detail, and delete behavior works on canonical models.
+- Project create/read/update/list, approval, lock, archive, and delete workflow works and enforces invalid-state restrictions server-side.
+- Approval/status and locking remain consistent with the resolved transition matrix and timestamps; cross-user access is denied.
+- TranscriptService is the single ingestion layer.
+- HTTP ingestion views call TranscriptService directly.
+- Management commands call TranscriptService directly.
+- No runtime code creates or updates legacy models after cutover.
+- Migration, service, workflow, command, and end-to-end integration tests pass.
+- python manage.py makemigrations --check exits successfully with no unintended changes.
+- python manage.py migrate exits successfully on a clean database and on a legacy-state test database.
+- python manage.py check exits successfully.
+- The full test suite exits successfully.
+- The reviewed dependency manifest can reproduce the verification environment from a clean virtual environment.
+- Any pre-existing unrelated failure is documented with evidence and is not concealed by changing assertions or skipping tests.
+
+DO NOT PROCEED TO PHASE 2 GATE
+Stop after Phase 1 unless every Phase 1 acceptance criterion passes. Do not add AnalysisSegment, AI calls, semantic segmentation, scoring, or selection UI while consolidation or data migration remains incomplete. Produce a concise consolidation report containing:
+- Files and migrations changed.
+- Canonical field/constraint decisions.
+- Legacy row counts before and canonical counts after migration.
+- Conflicts and how they were resolved or retained.
+- Exact validation commands and results.
+- Any remaining risk.
+
+PHASE 2 — AI TRANSCRIPT ANALYSIS (ONLY AFTER GATE APPROVAL)
+
+PHASE 2 OBJECTIVE
+Turn an approved, stable transcript into reviewable semantic segments, score those segments, and let a user select the best material without changing the source transcript.
+
+Task 2.1: Design AnalysisSegment.
+File-level targets: canonical models module plus a new additive migration.
+- Add AnalysisSegment belonging to SourceVideo (and therefore indirectly to VideoProject).
+- Include explicit transcript coverage: start/end chunk references or stable sequence/timing boundaries.
+- Store segment order, title/summary, source text or a reproducible reference to source chunks, semantic/topic labels, score components, aggregate score, selection state, analysis version, and timestamps.
+- Store provider/model/prompt or algorithm version metadata sufficient to reproduce and audit results, without storing secrets.
+- Add constraints for order, boundary validity, and uniqueness per analysis version.
+- Never overwrite TranscriptChunk text during analysis.
+
+Task 2.2: Build semantic segmentation as an isolated service.
+- Create an analysis service separate from TranscriptService.
+- Input: a SourceVideo with ordered TranscriptChunk records.
+- Output: validated segment proposals with complete source coverage rules.
+- Prefer transcript timing and sentence/topic boundaries; prevent overlaps and unexplained gaps unless explicitly supported.
+- Define minimum/maximum segment size and deterministic fallback segmentation for AI failure.
+- Validate structured AI output before persistence.
+- Make provider clients injectable and keep calls out of views/models.
+- Make analysis rerunnable by version without destroying prior accepted selections.
+
+Task 2.3: Implement scoring.
+- Define transparent score dimensions before coding, such as relevance, novelty, clarity, emotional/reaction potential, factual density, and clip suitability.
+- Define ranges, weights, aggregate calculation, and tie-breaking deterministically.
+- Store component scores and rationale so users can understand the ranking.
+- Validate and clamp/reject malformed scores rather than trusting model output.
+- Tests must not call live AI services.
+
+Task 2.4: Add selection UI.
+- Add an analysis page scoped to project/source video.
+- Show segment order, source timing/chunk range, text preview, summary/tags, component scores, aggregate score, rationale, and selected state.
+- Allow users to select/deselect segments and preserve selections safely.
+- Support filtering/sorting by score without changing canonical transcript order.
+- Enforce the resolved semantics: analysis and selection require an approved, unlocked, non-archived project. Locking freezes derived analysis/selection as well as canonical content. Implement this consistently server-side.
+- Use POST plus CSRF protection for mutations.
+
+Task 2.5: Add analysis tests.
+- Model constraints and ordering.
+- Deterministic boundary/coverage validation.
+- Structured-output validation, retry/fallback, provider failure, and transaction rollback.
+- Score calculation and malformed score handling.
+- Rerun/version behavior and preservation of selections.
+- Selection UI authorization, state restrictions, POST enforcement, display, sorting, and persistence.
+- Integration: canonical transcript -> analysis -> scored segments -> user selection.
+
+PHASE 2 ACCEPTANCE CRITERIA
+- AnalysisSegment is linked to SourceVideo with valid, auditable transcript boundaries.
+- Semantic segmentation produces ordered, non-overlapping, traceable segments under the documented coverage policy.
+- Source TranscriptChunk data remains unchanged.
+- Scores include validated components, aggregate value, and rationale.
+- AI/provider failures do not leave partial analysis data and have a deterministic user-visible outcome.
+- Reanalysis is versioned and does not silently destroy prior accepted work.
+- Users can inspect, sort, select, and deselect segments through an authorized, CSRF-protected UI.
+- Tests use mocked/fake provider boundaries and pass without network access.
+- makemigrations --check, migrate, check, and the full test suite all pass again.
+
+FINAL EXECUTION REPORT
+After each phase, report:
+1. Completed tasks and exact files changed.
+2. Migrations added and their forward/reverse behavior.
+3. Data reconciliation totals and unresolved conflicts.
+4. Tests added and command results.
+5. Acceptance criteria status, item by item.
+6. The next permitted task.
+
+If any DO NOT PROCEED gate fails, stop at that gate. Do not continue into later tasks, do not delete data, and do not weaken the gate. Explain the evidence and propose the smallest safe remediation.

@@ -1,57 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Saved Transcripts</title>
-    <style>
-        body { background: #f4f5fb; color: #252525; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 32px 20px; }
-        main { margin: 0 auto; max-width: 860px; }
-        header { align-items: center; display: flex; justify-content: space-between; margin-bottom: 24px; }
-        h1 { font-size: 28px; margin: 0; }
-        .link { color: #4e5fca; font-weight: 600; text-decoration: none; }
-        .video-list { background: #fff; border: 1px solid #e0e2ec; border-radius: 8px; list-style: none; margin: 0; padding: 0; }
-        .video-list li + li { border-top: 1px solid #e0e2ec; }
-        .video-row { align-items: center; display: flex; gap: 16px; justify-content: space-between; padding: 12px 20px; }
-        .video-list a { align-items: center; color: inherit; display: flex; flex: 1; gap: 16px; justify-content: space-between; text-decoration: none; }
-        .video-list a:hover { background: #f7f8ff; }
-        .video-title { color: #4e5fca; font-size: 15px; font-weight: 700; }
-        .metadata { color: #6b6f7b; font-size: 13px; margin-top: 5px; }
-        .count { background: #e8ebff; border-radius: 999px; color: #4351ad; font-size: 13px; padding: 6px 9px; white-space: nowrap; }
-        .delete-button { background: transparent; border: 1px solid #c73838; border-radius: 5px; color: #b42323; cursor: pointer; font: inherit; font-size: 13px; padding: 6px 9px; white-space: nowrap; }
-        .delete-button:hover { background: #fff0f0; }
-        .empty { background: #fff; border: 1px dashed #c8cad5; border-radius: 8px; color: #6b6f7b; padding: 36px; text-align: center; }
-    </style>
-</head>
-<body>
-    <main>
-        <header>
-            <h1>Saved Transcripts</h1>
-            <a class="link" href="{% url 'scraper_form' %}">Scrape a video</a>
-        </header>
-        {% if scraped_videos %}
-            <ul class="video-list">
-                {% for video in scraped_videos %}
-                    <li>
-                        <div class="video-row">
-                            <a href="{% url 'transcript_detail' video.pk %}">
-                                <div>
-                                    <div class="video-title">{{ video.video_title }}</div>
-                                    <div class="metadata">Scraped {{ video.created_at|date:"M d, Y H:i" }}</div>
-                                </div>
-                                <span class="count">{{ video.entries.count }} entries</span>
-                            </a>
-                            <form method="post" action="{% url 'delete_transcript' video.pk %}">
-                                {% csrf_token %}
-                                <button class="delete-button" type="submit" onclick="return confirm('Delete this saved transcript?');">Delete</button>
-                            </form>
-                        </div>
-                    </li>
-                {% endfor %}
-            </ul>
-        {% else %}
-            <section class="empty">No transcripts have been saved yet.</section>
-        {% endif %}
-    </main>
-</body>
-</html>
+{% extends "scraper/base.html" %}
+{% block title %}Saved transcripts{% endblock %}
+{% block content %}
+<h1>Saved transcripts</h1>
+{% for source in source_videos %}
+    <article class="card">
+        <h2><a href="{% url 'transcript_detail' source.pk %}">{{ source.title }}</a></h2>
+        <p>Project: <a href="{% url 'project_detail' source.project.pk %}">{{ source.project.title }}</a></p>
+        <p><a href="{{ source.youtube_url }}">{{ source.youtube_video_id }}</a></p>
+        <p class="muted">Saved {{ source.created_at }}</p>
+    </article>
+{% empty %}<p>No saved transcripts.</p>{% endfor %}
+{% endblock %}

@@ -1,48 +1,5 @@
-# Python bytecode and cache files
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-
-# Virtual environment
-venv/
-env/
-ENV/
-.venv
-
-# Database
-db.sqlite3
-*.db
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-env.py
-
-# IDE and editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Static and media files
-staticfiles/
-media/
-
-# Logs
-*.log
-logs/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Documentation and notes (local development)
 notes.txt
+env.py
 youtube_reaction_video_pipeline_plan.txt
 plansteps.txt
 youtube_content_creator_repository_review_next_steps.txt
