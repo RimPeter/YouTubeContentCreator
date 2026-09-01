@@ -445,6 +445,10 @@ class SourceClipService:
                 status=SourceClip.Status.STALE,
                 updated_at=timezone.now(),
             )
+            from editorial.services.research import invalidate_clip_editorial_outputs
+
+            for stale_clip in SourceClip.objects.filter(pk__in=stale_ids):
+                invalidate_clip_editorial_outputs(stale_clip)
         return len(stale_ids)
 
     @classmethod
@@ -478,6 +482,9 @@ class SourceClipService:
                 for previous in older:
                     previous.status = SourceClip.Status.SUPERSEDED
                     previous.save(update_fields=["status", "updated_at"])
+                    from editorial.services.research import invalidate_clip_editorial_outputs
+
+                    invalidate_clip_editorial_outputs(previous)
                 MediaAssetService.approve(clip.processed_asset, user)
                 clip.status = SourceClip.Status.APPROVED
                 clip.approved_by = user

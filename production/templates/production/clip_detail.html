@@ -3,6 +3,7 @@
 {% block content %}
 <h1>{{ clip.selected_segment.analysis_segment.title }} · clip v{{ clip.version }}</h1>
 <p><a href="{% url 'production:project_clips' clip.project.pk %}">Back to {{ clip.project.title }} source clips</a></p>
+{% if clip.status == "approved" %}<p><a class="button" href="{% url 'editorial:project_editorial' clip.project.pk %}">Research and reaction drafting</a></p>{% endif %}
 <p>Status: {{ clip.get_status_display }} · Job: {{ clip.pipeline_job.get_status_display }}</p>
 {% if is_stale %}<div class="card">This clip is stale because its selected input changed. Regenerate it before approval.</div>{% endif %}
 

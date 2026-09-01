@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "scraper",
     "analysis",
     "production",
+    "editorial",
 
     "django.contrib.sites",
     "allauth",

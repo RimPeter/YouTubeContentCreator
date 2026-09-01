@@ -1,0 +1,32 @@
+{% extends "scraper/base.html" %}
+{% block title %}Research v{{ package.version }}{% endblock %}
+{% block content %}
+<h1>Research v{{ package.version }} · {{ package.get_status_display }}</h1>
+<p><a href="{% url 'editorial:project_editorial' package.project_id %}">Back to {{ package.project.title }} editorial</a></p>
+<section class="card"><h2>{{ package.research_question }}</h2><p>{{ package.editorial_focus }}</p>
+<p class="muted">External evidence is never trusted until a user verifies it.</p></section>
+
+<h2>Evidence</h2>
+{% for evidence in package.evidence_sources.all %}
+<section class="card">
+    <h3><a href="{{ evidence.source_url }}" rel="noopener noreferrer">{{ evidence.title }}</a></h3>
+    <p>{{ evidence.publisher }} · {{ evidence.get_classification_display }} · {{ evidence.get_verification_status_display }}</p>
+    <p><strong>Finding:</strong> {{ evidence.finding }}</p><p><strong>Relevance:</strong> {{ evidence.relevance }}</p>
+    {% if package.status == "draft" %}
+    <form class="inline" method="post" action="{% url 'editorial:verify_evidence' evidence.pk %}">{% csrf_token %}<button>Verify</button></form>
+    <form class="inline" method="post" action="{% url 'editorial:reject_evidence' evidence.pk %}">{% csrf_token %}<button>Reject</button></form>
+    <form class="inline" method="post" action="{% url 'editorial:delete_evidence' evidence.pk %}">{% csrf_token %}<button class="danger">Delete</button></form>
+    {% endif %}
+</section>
+{% empty %}<p class="muted">No external evidence. Transcript-only commentary is allowed when its factual claims cite transcript chunks.</p>{% endfor %}
+
+{% if package.status == "draft" %}
+<section class="card"><h2>Add evidence lead</h2><form method="post" action="{% url 'editorial:add_evidence' package.pk %}">{% csrf_token %}{{ evidence_form.as_p }}<button>Add as unverified</button></form></section>
+<form method="post" action="{% url 'editorial:mark_research_ready' package.pk %}">{% csrf_token %}<button>Confirm review and mark ready</button></form>
+{% elif package.status == "ready" %}
+<form method="post" action="{% url 'editorial:generate_reaction' package.pk %}">{% csrf_token %}<button>Generate reaction draft</button></form>
+{% endif %}
+
+<h2>Reaction versions</h2>
+{% for block in reactions %}<p><a href="{% url 'editorial:reaction_detail' block.pk %}">Reaction v{{ block.version }}</a> · {{ block.get_status_display }}{% if block.used_fallback %} · deterministic fallback{% endif %}</p>{% empty %}<p class="muted">None yet.</p>{% endfor %}
+{% endblock %}

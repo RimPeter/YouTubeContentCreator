@@ -1,0 +1,25 @@
+{% extends "scraper/base.html" %}
+{% block title %}Reaction v{{ block.version }}{% endblock %}
+{% block content %}
+<h1>Reaction v{{ block.version }} · {{ block.get_status_display }}</h1>
+<p><a href="{% url 'editorial:research_detail' block.research_package_id %}">Back to research v{{ block.research_package.version }}</a></p>
+{% if block.used_fallback %}<div class="card">A deterministic transcript-only fallback was used. Review and substantially revise it as needed.</div>{% endif %}
+<section class="card"><h2>Combined script</h2><div style="white-space:pre-wrap">{{ block.combined_script }}</div></section>
+<h2>Traceable claims</h2>
+{% for claim in block.claims.all %}
+<section class="card"><strong>{{ claim.order }}. {{ claim.get_claim_type_display }}</strong><p>{{ claim.text }}</p>
+{% if claim.transcript_chunk %}<p>Transcript chunk #{{ claim.transcript_chunk.sequence }}</p>{% endif %}
+{% if claim.evidence_source %}<p>Evidence: <a href="{{ claim.evidence_source.source_url }}">{{ claim.evidence_source.title }}</a></p>{% endif %}
+<p class="muted">{{ claim.citation_note }}</p>
+{% if block.status == "draft" %}<form method="post" action="{% url 'editorial:delete_claim' claim.pk %}">{% csrf_token %}<button class="danger">Delete claim</button></form>{% endif %}</section>
+{% empty %}<div class="card">No claims. Approval is blocked.</div>{% endfor %}
+
+{% if block.status == "draft" %}
+<section class="card"><h2>Edit subsections</h2><form method="post" action="{% url 'editorial:edit_reaction' block.pk %}">{% csrf_token %}{{ edit_form.as_p }}<button>Save and rebuild combined script</button></form></section>
+<section class="card"><h2>Add claim</h2><form method="post" action="{% url 'editorial:add_claim' block.pk %}">{% csrf_token %}{{ claim_form.as_p }}<button>Add claim</button></form></section>
+<section class="card"><h2>Human approval</h2><form method="post" action="{% url 'editorial:approve_reaction' block.pk %}">{% csrf_token %}
+<label><input style="display:inline;width:auto" type="checkbox" name="evidence_reviewed" required> I reviewed every factual claim and citation.</label><br>
+<label><input style="display:inline;width:auto" type="checkbox" name="originality_confirmed" required> I confirm the commentary is substantially original.</label><br><br>
+<button>Approve reaction</button></form></section>
+{% endif %}
+{% endblock %}
