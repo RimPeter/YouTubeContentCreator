@@ -4,7 +4,7 @@ from django.test import TransactionTestCase
 
 
 class ProductionInitialMigrationTests(TransactionTestCase):
-    migrate_to = ("production", "0002_media_one_approved_lineage")
+    migrate_to = ("production", "0003_sourceclip")
 
     def setUp(self):
         super().setUp()
@@ -31,11 +31,13 @@ class ProductionInitialMigrationTests(TransactionTestCase):
         MediaAsset = apps.get_model("production", "MediaAsset")
         PipelineJob = apps.get_model("production", "PipelineJob")
         ArtifactDependency = apps.get_model("production", "ArtifactDependency")
+        SourceClip = apps.get_model("production", "SourceClip")
 
         self.assertTrue(VideoProject.objects.filter(pk=self.project_pk).exists())
         self.assertEqual(MediaAsset.objects.count(), 0)
         self.assertEqual(PipelineJob.objects.count(), 0)
         self.assertEqual(ArtifactDependency.objects.count(), 0)
+        self.assertEqual(SourceClip.objects.count(), 0)
 
         executor = MigrationExecutor(connection)
         executor.migrate([("production", None)])

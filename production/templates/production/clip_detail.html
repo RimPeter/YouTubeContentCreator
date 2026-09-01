@@ -1,0 +1,33 @@
+{% extends "scraper/base.html" %}
+{% block title %}Source clip v{{ clip.version }}{% endblock %}
+{% block content %}
+<h1>{{ clip.selected_segment.analysis_segment.title }} · clip v{{ clip.version }}</h1>
+<p><a href="{% url 'production:project_clips' clip.project.pk %}">Back to {{ clip.project.title }} source clips</a></p>
+<p>Status: {{ clip.get_status_display }} · Job: {{ clip.pipeline_job.get_status_display }}</p>
+{% if is_stale %}<div class="card">This clip is stale because its selected input changed. Regenerate it before approval.</div>{% endif %}
+
+{% if clip.processed_asset %}
+<section class="card">
+    <h2>Authenticated preview</h2>
+    <video controls preload="metadata" style="max-width:100%;" src="{% url 'production:stream_source_clip' clip.pk %}"></video>
+    <p>{{ clip.actual_duration_seconds }} seconds · {{ clip.processed_asset.width }}×{{ clip.processed_asset.height }} · {{ clip.processed_asset.frame_rate }} fps</p>
+    <p>SHA-256: <code>{{ clip.processed_asset.checksum_sha256 }}</code></p>
+</section>
+{% endif %}
+
+<section class="card">
+    <h2>Timing and validation</h2>
+    <p>Requested: {{ clip.requested_start_seconds }}–{{ clip.requested_end_seconds }} seconds</p>
+    <p>Actual source range: {{ clip.actual_start_seconds }}–{{ clip.actual_end_seconds }} seconds</p>
+    <p>Padding: {{ clip.padding_before_seconds }} before, {{ clip.padding_after_seconds }} after</p>
+    <pre>{{ clip.validation_result }}</pre>
+</section>
+
+{% if clip.status == "validated" and not is_stale and clip.project.status == "approved" and not clip.project.is_locked %}
+<form method="post" action="{% url 'production:approve_source_clip' clip.pk %}">
+    {% csrf_token %}
+    <button type="submit">Approve clip</button>
+</form>
+{% endif %}
+{% if clip.error_message %}<div class="card">{{ clip.error_message }}</div>{% endif %}
+{% endblock %}

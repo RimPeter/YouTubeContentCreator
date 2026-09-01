@@ -169,6 +169,109 @@ class MediaAssetService:
             except FileNotFoundError:
                 pass
 
+    def create_generated_file(
+        self,
+        project,
+        local_path,
+        user,
+        *,
+        kind,
+        display_name,
+        rights_basis,
+        rights_notes="",
+        consent_metadata=None,
+        configuration=None,
+        previous_asset=None,
+    ):
+        ensure_production_allowed(project, user)
+        local_path = Path(local_path)
+        extension = local_path.suffix.lower()
+        allowed = {value.lower() for value in settings.PRODUCTION_ALLOWED_MEDIA_EXTENSIONS}
+        if extension not in allowed or not local_path.is_file():
+            raise MediaAssetValidationError(
+                "Generated media is missing or has an unsupported extension.",
+                "generated_media_missing",
+            )
+        byte_size = local_path.stat().st_size
+        if byte_size <= 0 or byte_size > settings.PRODUCTION_MAX_UPLOAD_BYTES:
+            raise MediaAssetValidationError(
+                "Generated media has an invalid byte size.", "generated_media_size"
+            )
+        digest = hashlib.sha256()
+        with local_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        try:
+            metadata = self.probe_client.probe(local_path, extension)
+        except MediaProbeError as exc:
+            raise MediaAssetValidationError(str(exc), exc.code) from exc
+
+        asset = None
+        stored_name = ""
+        committed = False
+        try:
+            with transaction.atomic():
+                locked_project = VideoProject.objects.select_for_update().get(pk=project.pk)
+                ensure_production_allowed(locked_project, user)
+                lineage_id = None
+                version = 1
+                if previous_asset is not None:
+                    previous = MediaAsset.objects.select_for_update().get(pk=previous_asset.pk)
+                    if previous.project_id != locked_project.pk or previous.kind != kind:
+                        raise MediaAssetValidationError(
+                            "The previous generated asset is incompatible."
+                        )
+                    lineage_id = previous.lineage_id
+                    version = (
+                        MediaAsset.objects.filter(lineage_id=lineage_id).aggregate(
+                            latest=Max("version")
+                        )["latest"]
+                        or 0
+                    ) + 1
+                asset = MediaAsset(
+                    project=locked_project,
+                    version=version,
+                    kind=kind,
+                    status=MediaAsset.Status.VALIDATED,
+                    display_name=_display_name(display_name),
+                    checksum_sha256=digest.hexdigest(),
+                    byte_size=byte_size,
+                    duration_seconds=metadata.duration_seconds,
+                    width=metadata.width,
+                    height=metadata.height,
+                    frame_rate=metadata.frame_rate,
+                    has_audio=metadata.has_audio,
+                    has_video=metadata.has_video,
+                    detected_mime_type=metadata.detected_mime_type,
+                    container=metadata.container,
+                    video_codec=metadata.video_codec,
+                    audio_codec=metadata.audio_codec,
+                    origin=MediaAsset.Origin.GENERATED,
+                    rights_basis=rights_basis,
+                    rights_notes=str(rights_notes)[:5000],
+                    consent_metadata=consent_metadata or {},
+                    configuration_snapshot=configuration or {},
+                    created_by=user,
+                    validated_at=timezone.now(),
+                )
+                if lineage_id is not None:
+                    asset.lineage_id = lineage_id
+                with local_path.open("rb") as handle:
+                    asset.file.save(f"generated{extension}", File(handle), save=False)
+                stored_name = asset.file.name
+                asset.full_clean()
+                asset.save()
+            committed = True
+            return asset
+        except IntegrityError as exc:
+            if asset and stored_name:
+                asset.file.storage.delete(stored_name)
+            raise MediaAssetValidationError("Could not allocate a media asset version.") from exc
+        except Exception:
+            if asset and stored_name and not committed:
+                asset.file.storage.delete(stored_name)
+            raise
+
     @staticmethod
     def approve(asset, user):
         with transaction.atomic():

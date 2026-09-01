@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Transcript analysis</h1>
 <p><a href="{% url 'project_detail' project.pk %}">{{ project.title }}</a></p>
+<p><a class="button" href="{% url 'production:project_clips' project.pk %}">Create source clips</a></p>
 <p>Status: {{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</p>
 
 {% if project.status != "approved" or project.is_locked %}

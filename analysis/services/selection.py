@@ -104,6 +104,9 @@ class SelectionService:
                         "updated_at",
                     ]
                 )
+                from production.services.clips import SourceClipService
+
+                SourceClipService.invalidate_selection_outputs(existing, user)
                 return existing, False
             next_order = (
                 SegmentSelection.objects.filter(project=project).aggregate(latest=Max("order"))[

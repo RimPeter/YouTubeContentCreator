@@ -1,0 +1,60 @@
+{% extends "scraper/base.html" %}
+{% block title %}Source clips · {{ project.title }}{% endblock %}
+{% block content %}
+<h1>Source clips</h1>
+<p><a href="{% url 'project_detail' project.pk %}">{{ project.title }}</a> · <a href="{% url 'analysis:project_dashboard' project.pk %}">Transcript analysis</a></p>
+<p>Status: {{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</p>
+
+{% if project.status != "approved" or project.is_locked %}
+<div class="card">Uploading and clip generation require an approved, unlocked project.</div>
+{% else %}
+<section class="card">
+    <h2>Upload authorized source media</h2>
+    <p>This workflow accepts a local file only. It does not download or screen-record YouTube.</p>
+    <form method="post" enctype="multipart/form-data" action="{% url 'production:upload_source_media' project.pk %}">
+        {% csrf_token %}
+        {{ upload_form.as_p }}
+        <button type="submit">Upload and validate</button>
+    </form>
+</section>
+{% endif %}
+
+<section class="card">
+    <h2>Validated source uploads</h2>
+    <ul>
+    {% for asset in source_assets %}
+        <li>{{ asset.display_name }} · {{ asset.get_status_display }} · {{ asset.duration_seconds|default:"unknown" }} seconds · {{ asset.get_rights_basis_display }}</li>
+    {% empty %}<li>No source media uploaded.</li>{% endfor %}
+    </ul>
+</section>
+
+<section>
+    <h2>Selected transcript segments</h2>
+    {% for row in rows %}
+    <article class="card">
+        <h3>{{ row.selection.order }}. {{ row.selection.analysis_segment.title }}</h3>
+        <p>{{ row.selection.analysis_segment.analysis_run.source_video.title }}</p>
+        <p>
+            {% if row.selection.reviewed_start_seconds != None %}
+                {{ row.selection.reviewed_start_seconds }}–{{ row.selection.reviewed_end_seconds }} seconds
+            {% else %}
+                {{ row.selection.analysis_segment.start_seconds }}–{{ row.selection.analysis_segment.end_seconds }} seconds
+            {% endif %}
+        </p>
+        {% if project.status == "approved" and not project.is_locked and source_assets %}
+        <form method="post" action="{% url 'production:create_source_clip' row.selection.pk %}">
+            {% csrf_token %}
+            {{ row.form.as_p }}
+            <button type="submit">Create validated clip</button>
+        </form>
+        {% endif %}
+        <h4>Clip versions</h4>
+        <ul>
+        {% for clip in row.clips %}
+            <li><a href="{% url 'production:clip_detail' clip.pk %}">Version {{ clip.version }}</a> · {{ clip.get_status_display }} · job {{ clip.pipeline_job.get_status_display }}</li>
+        {% empty %}<li>No clips generated.</li>{% endfor %}
+        </ul>
+    </article>
+    {% empty %}<p>Select at least one transcript-analysis segment first.</p>{% endfor %}
+</section>
+{% endblock %}

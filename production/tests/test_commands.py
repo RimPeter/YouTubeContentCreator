@@ -8,19 +8,24 @@ from production.services.probe import MediaProbeError
 
 
 class ProductionHealthCommandTests(SimpleTestCase):
+    @patch("production.management.commands.check_production_health.FFmpegClient")
     @patch("production.management.commands.check_production_health.FFprobeClient")
-    def test_health_command_reports_success(self, client_class):
-        client_class.return_value.healthcheck.return_value = "ffprobe version test"
+    def test_health_command_reports_success(self, probe_class, ffmpeg_class):
+        probe_class.return_value.healthcheck.return_value = "ffprobe version test"
+        ffmpeg_class.return_value.healthcheck.return_value = "ffmpeg version test"
         output = StringIO()
 
         call_command("check_production_health", stdout=output)
 
         self.assertIn("ffprobe version test", output.getvalue())
+        self.assertIn("ffmpeg version test", output.getvalue())
         self.assertIn("health check passed", output.getvalue())
 
+    @patch("production.management.commands.check_production_health.FFmpegClient")
     @patch("production.management.commands.check_production_health.FFprobeClient")
-    def test_health_command_fails_with_sanitized_code(self, client_class):
-        client_class.return_value.healthcheck.side_effect = MediaProbeError(
+    def test_health_command_fails_with_sanitized_code(self, probe_class, ffmpeg_class):
+        ffmpeg_class.return_value.healthcheck.return_value = "ffmpeg version test"
+        probe_class.return_value.healthcheck.side_effect = MediaProbeError(
             "ffprobe_unavailable", "sensitive detail"
         )
 

@@ -264,6 +264,191 @@ class PipelineJob(models.Model):
             raise ValidationError(errors)
 
 
+class SourceClip(models.Model):
+    class Status(models.TextChoices):
+        PROCESSING = "processing", "Processing"
+        VALIDATED = "validated", "Validated"
+        APPROVED = "approved", "Approved"
+        FAILED = "failed", "Failed"
+        STALE = "stale", "Stale"
+        SUPERSEDED = "superseded", "Superseded"
+
+    project = models.ForeignKey(
+        "scraper.VideoProject", on_delete=models.CASCADE, related_name="source_clips"
+    )
+    selected_segment = models.ForeignKey(
+        "analysis.SegmentSelection",
+        on_delete=models.PROTECT,
+        related_name="source_clips",
+    )
+    source_asset = models.ForeignKey(
+        MediaAsset,
+        on_delete=models.PROTECT,
+        related_name="source_clip_inputs",
+    )
+    processed_asset = models.OneToOneField(
+        MediaAsset,
+        on_delete=models.PROTECT,
+        related_name="source_clip_output",
+        null=True,
+        blank=True,
+    )
+    pipeline_job = models.OneToOneField(
+        PipelineJob,
+        on_delete=models.PROTECT,
+        related_name="source_clip",
+    )
+    version = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PROCESSING
+    )
+    input_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
+    requested_start_seconds = models.DecimalField(max_digits=12, decimal_places=3)
+    requested_end_seconds = models.DecimalField(max_digits=12, decimal_places=3)
+    padding_before_seconds = models.DecimalField(max_digits=7, decimal_places=3, default=0)
+    padding_after_seconds = models.DecimalField(max_digits=7, decimal_places=3, default=0)
+    actual_start_seconds = models.DecimalField(
+        max_digits=12, decimal_places=3, null=True, blank=True
+    )
+    actual_end_seconds = models.DecimalField(
+        max_digits=12, decimal_places=3, null=True, blank=True
+    )
+    expected_duration_seconds = models.DecimalField(max_digits=12, decimal_places=3)
+    actual_duration_seconds = models.DecimalField(
+        max_digits=12, decimal_places=3, null=True, blank=True
+    )
+    validation_result = models.JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
+    error_message = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="source_clips_created",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_clips_approved",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    validated_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["project", "selected_segment", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["selected_segment", "version"],
+                name="source_clip_selection_ver_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["selected_segment"],
+                condition=models.Q(status="approved"),
+                name="source_clip_one_approved",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version__gte=1), name="source_clip_version_gte_1"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(requested_start_seconds__gte=0),
+                name="source_clip_requested_start_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    requested_end_seconds__gt=models.F("requested_start_seconds")
+                ),
+                name="source_clip_requested_time_order",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(padding_before_seconds__gte=0)
+                & models.Q(padding_after_seconds__gte=0),
+                name="source_clip_padding_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(expected_duration_seconds__gt=0),
+                name="source_clip_expected_duration_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(actual_duration_seconds__isnull=True)
+                | models.Q(actual_duration_seconds__gt=0),
+                name="source_clip_actual_duration_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(actual_start_seconds__isnull=True)
+                | models.Q(actual_start_seconds__gte=0),
+                name="source_clip_actual_start_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(actual_end_seconds__isnull=True)
+                | models.Q(actual_start_seconds__isnull=True)
+                | models.Q(actual_end_seconds__gt=models.F("actual_start_seconds")),
+                name="source_clip_actual_time_order",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["project", "status", "-created_at"],
+                name="source_clip_project_state_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Selection {self.selected_segment_id} clip v{self.version}"
+
+    def clean(self):
+        errors = {}
+        if self.selected_segment_id and self.project_id:
+            if self.selected_segment.project_id != self.project_id:
+                errors["selected_segment"] = "The selection must belong to this project."
+        if self.source_asset_id and self.project_id:
+            if self.source_asset.project_id != self.project_id:
+                errors["source_asset"] = "The source asset must belong to this project."
+            if self.source_asset.kind != MediaAsset.Kind.SOURCE_UPLOAD:
+                errors["source_asset"] = "Source clips require a source-upload asset."
+        if self.processed_asset_id and self.project_id:
+            if self.processed_asset.project_id != self.project_id:
+                errors["processed_asset"] = "The processed asset must belong to this project."
+            if self.processed_asset.kind != MediaAsset.Kind.SOURCE_CLIP:
+                errors["processed_asset"] = "The processed asset must be a source clip."
+        if self.pipeline_job_id and self.project_id:
+            if self.pipeline_job.project_id != self.project_id:
+                errors["pipeline_job"] = "The pipeline job must belong to this project."
+            if self.pipeline_job.job_type != "clip_trim":
+                errors["pipeline_job"] = "Source clips require a clip-trim job."
+        completed_statuses = {
+            self.Status.VALIDATED,
+            self.Status.APPROVED,
+            self.Status.STALE,
+            self.Status.SUPERSEDED,
+        }
+        if self.status in completed_statuses:
+            if not self.processed_asset_id:
+                errors["processed_asset"] = "This clip status requires processed media."
+            if self.actual_start_seconds is None or self.actual_end_seconds is None:
+                errors["actual_start_seconds"] = "This clip status requires actual boundaries."
+            if self.actual_duration_seconds is None:
+                errors["actual_duration_seconds"] = "This clip status requires a duration."
+            if self.validated_at is None:
+                errors["validated_at"] = "This clip status requires validation."
+        if self.status == self.Status.APPROVED:
+            if self.approved_at is None or self.approved_by_id is None:
+                errors["approved_at"] = "Approved clips require an approver and timestamp."
+        if self.approved_at is not None and self.status not in {
+            self.Status.APPROVED,
+            self.Status.STALE,
+            self.Status.SUPERSEDED,
+        }:
+            errors["approved_at"] = "Only approved or historical clips may retain approval."
+        if self.status == self.Status.FAILED and not self.error_code:
+            errors["error_code"] = "Failed clips require a sanitized error code."
+        if errors:
+            raise ValidationError(errors)
+
+
 class ArtifactDependency(models.Model):
     project = models.ForeignKey(
         "scraper.VideoProject",

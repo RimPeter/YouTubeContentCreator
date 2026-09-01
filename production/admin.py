@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import ArtifactDependency, MediaAsset, PipelineJob
+from .models import ArtifactDependency, MediaAsset, PipelineJob, SourceClip
 
 
 @admin.register(MediaAsset)
@@ -64,6 +64,34 @@ class PipelineJobAdmin(admin.ModelAdmin):
         "started_at",
         "completed_at",
         "cancelled_at",
+    )
+
+
+@admin.register(SourceClip)
+class SourceClipAdmin(admin.ModelAdmin):
+    list_display = (
+        "selected_segment",
+        "project",
+        "version",
+        "status",
+        "actual_duration_seconds",
+        "updated_at",
+    )
+    list_filter = ("status",)
+    search_fields = (
+        "project__title",
+        "selected_segment__analysis_segment__title",
+        "input_fingerprint",
+    )
+    readonly_fields = (
+        "input_fingerprint",
+        "validation_result",
+        "error_code",
+        "error_message",
+        "created_at",
+        "updated_at",
+        "validated_at",
+        "approved_at",
     )
 
 

@@ -45,7 +45,7 @@ Gate C passes. FFmpeg/FFprobe 9.0.1 was installed through Windows Package Manage
 
 ## Operations
 
-- `python manage.py check_production_health` reports the storage backend and validates FFprobe availability.
+- `python manage.py check_production_health` reports the storage backend and validates both FFmpeg and FFprobe availability.
 - `python manage.py cleanup_media_assets --older-than-days N` is dry-run by default.
 - Cleanup requires `--execute`, only considers old failed/superseded assets, and skips approved/current or dependency-referenced assets.
 - No background worker is introduced yet because no capture, TTS, or render job is exposed to normal UI use. The job contract is ready for a runner when measured Phase D work requires one.
@@ -60,7 +60,7 @@ Gate C passes. FFmpeg/FFprobe 9.0.1 was installed through Windows Package Manage
 - `python manage.py test`: 72 tests passed after all Phase C migrations and approval-lineage hardening.
 - `ffmpeg -version`: passed with FFmpeg 9.0.1 full build.
 - `ffprobe -version`: passed with FFprobe 9.0.1 full build.
-- `python manage.py check_production_health`: passed against the configured `FileSystemStorage` and live FFprobe executable.
+- `python manage.py check_production_health`: passed against the configured `FileSystemStorage` and live FFmpeg/FFprobe executables.
 - `python manage.py test production`: 28 tests passed again after the live tool installation.
 
 ## Next permitted action
