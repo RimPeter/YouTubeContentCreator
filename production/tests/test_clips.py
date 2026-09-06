@@ -244,3 +244,79 @@ class SourceClipServiceTests(TestCase):
         clip.processed_asset.refresh_from_db()
         self.assertEqual(clip.status, SourceClip.Status.STALE)
         self.assertEqual(clip.processed_asset.status, MediaAsset.Status.STALE)
+
+
+    def test_reverting_boundaries_creates_fresh_usable_version(self):
+        first, _ = self.service.create_clip(self.selection, self.asset, self.user)
+        SourceClipService.approve(first, self.user)
+        SelectionService.select(self.project, self.selection.analysis_segment, self.user,
+                                reviewed_start=1, reviewed_end=2.5)
+        SelectionService.select(self.project, self.selection.analysis_segment, self.user,
+                                reviewed_start=1, reviewed_end=3)
+        second, created = self.service.create_clip(self.selection, self.asset, self.user)
+        self.assertTrue(created)
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(second.version, first.version + 1)
+        self.assertEqual(SourceClipService.approve(second, self.user).status, SourceClip.Status.APPROVED)
+        first.refresh_from_db()
+        self.assertEqual(first.status, SourceClip.Status.STALE)
+
+    def test_missing_output_regenerates_instead_of_reusing_successful_job(self):
+        first, _ = self.service.create_clip(self.selection, self.asset, self.user)
+        first.processed_asset.file.storage.delete(first.processed_asset.file.name)
+        second, created = self.service.create_clip(self.selection, self.asset, self.user)
+        self.assertTrue(created)
+        self.assertNotEqual(first.pipeline_job_id, second.pipeline_job_id)
+        self.assertEqual(second.status, SourceClip.Status.VALIDATED)
+        self.assertEqual(PipelineJob.objects.get(pk=first.pipeline_job_id).status, PipelineJob.Status.SUCCEEDED)
+
+    def test_changed_transcript_blocks_approval_and_persists_stale(self):
+        clip, _ = self.service.create_clip(self.selection, self.asset, self.user)
+        self.source.transcript_chunks.filter(sequence=1).update(text="Corrected transcript")
+        with self.assertRaises(SourceClipError):
+            SourceClipService.approve(clip, self.user)
+        clip.refresh_from_db()
+        self.assertEqual(clip.status, SourceClip.Status.STALE)
+        self.assertEqual(clip.processed_asset.status, MediaAsset.Status.STALE)
+
+    def test_retirement_preserves_and_invalidates_full_editorial_history(self):
+        from editorial.models import ResearchPackage, ReactionBlock
+        from editorial.services.research import ResearchService
+        from editorial.services.reactions import ReactionService
+        clip, _ = self.service.create_clip(self.selection, self.asset, self.user)
+        clip = SourceClipService.approve(clip, self.user)
+        package = ResearchService.create_package(clip, self.user,
+            research_question="What evidence supports this?", editorial_focus="Review the source.")
+        package = ResearchService.mark_ready(package, self.user)
+        block = ReactionService().generate(package, self.user)
+        ReactionService.approve(block, self.user, evidence_reviewed=True, originality_confirmed=True)
+        SelectionService.deselect(self.project, self.selection, self.user)
+        self.selection.refresh_from_db(); clip.refresh_from_db(); package.refresh_from_db(); block.refresh_from_db()
+        self.assertIsNotNone(self.selection.retired_at)
+        self.assertEqual(clip.status, SourceClip.Status.STALE)
+        self.assertEqual(package.status, ResearchPackage.Status.STALE)
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+        self.assertTrue(clip.processed_asset.file.storage.exists(clip.processed_asset.file.name))
+        with self.assertRaises(SourceClipError):
+            self.service.enqueue_clip(self.selection, self.asset, self.user)
+
+    def test_retirement_during_processing_cannot_publish_output(self):
+        original_trim = self.ffmpeg.trim
+        def retire_during_trim(*args):
+            original_trim(*args)
+            SelectionService.deselect(self.project, self.selection, self.user)
+        self.ffmpeg.trim = retire_during_trim
+        with self.assertRaises(SourceClipError):
+            self.service.create_clip(self.selection, self.asset, self.user)
+        clip = SourceClip.objects.get()
+        self.assertEqual(clip.status, SourceClip.Status.FAILED)
+        self.assertIsNone(clip.processed_asset_id)
+        self.assertEqual(clip.pipeline_job.status, PipelineJob.Status.CANCELLED)
+        self.assertFalse(MediaAsset.objects.filter(kind=MediaAsset.Kind.SOURCE_CLIP).exists())
+
+    def test_queue_and_artifact_rollback_together_when_setup_fails(self):
+        with patch("production.services.clips.SourceClip.full_clean", side_effect=RuntimeError("setup failed")):
+            with self.assertRaises(RuntimeError):
+                self.service.enqueue_clip(self.selection, self.asset, self.user)
+        self.assertEqual(PipelineJob.objects.count(), 0)
+        self.assertEqual(SourceClip.objects.count(), 0)

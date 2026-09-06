@@ -5,6 +5,7 @@ from scraper.models import VideoProject
 from scraper.services import (
     DuplicateSourceError,
     ProjectMutationForbiddenError,
+    ProjectWorkflowService,
     TranscriptService,
     TranscriptServiceError,
 )
@@ -57,11 +58,11 @@ class Command(BaseCommand):
             return
         except (TranscriptServiceError, ProjectMutationForbiddenError) as exc:
             if project_created:
-                project.delete()
+                ProjectWorkflowService.discard_empty_draft(project)
             raise CommandError(str(exc)) from exc
         except Exception as exc:
             if project_created:
-                project.delete()
+                ProjectWorkflowService.discard_empty_draft(project)
             raise CommandError("Transcript ingestion failed.") from exc
         self.stdout.write(
             self.style.SUCCESS(

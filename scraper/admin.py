@@ -8,7 +8,36 @@ from .models import (
 )
 
 
-class SourceVideoInline(admin.TabularInline):
+class ReadOnlyArtifactAdmin(admin.ModelAdmin):
+    """Inspect workflow records; all writes go through the application services."""
+
+    def get_readonly_fields(self, request, obj=None):
+        return tuple(field.name for field in self.model._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class ReadOnlyArtifactInline(admin.TabularInline):
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class SourceVideoInline(ReadOnlyArtifactInline):
     model = SourceVideo
     extra = 0
     fields = ("title", "youtube_video_id", "transcript_status", "created_at")
@@ -17,7 +46,7 @@ class SourceVideoInline(admin.TabularInline):
 
 
 @admin.register(VideoProject)
-class VideoProjectAdmin(admin.ModelAdmin):
+class VideoProjectAdmin(ReadOnlyArtifactAdmin):
     list_display = ("title", "owner", "status", "is_locked", "updated_at")
     list_filter = ("status", "is_locked")
     search_fields = ("title", "owner__username")
@@ -25,7 +54,7 @@ class VideoProjectAdmin(admin.ModelAdmin):
     inlines = (SourceVideoInline,)
 
 
-class TranscriptChunkInline(admin.TabularInline):
+class TranscriptChunkInline(ReadOnlyArtifactInline):
     model = TranscriptChunk
     extra = 0
     fields = ("sequence", "start_seconds", "duration_seconds", "text")
@@ -34,7 +63,7 @@ class TranscriptChunkInline(admin.TabularInline):
 
 
 @admin.register(SourceVideo)
-class SourceVideoAdmin(admin.ModelAdmin):
+class SourceVideoAdmin(ReadOnlyArtifactAdmin):
     list_display = ("title", "project", "youtube_video_id", "transcript_status", "created_at")
     list_filter = ("transcript_status",)
     search_fields = ("title", "youtube_video_id", "project__title")
@@ -43,14 +72,14 @@ class SourceVideoAdmin(admin.ModelAdmin):
 
 
 @admin.register(TranscriptChunk)
-class TranscriptChunkAdmin(admin.ModelAdmin):
+class TranscriptChunkAdmin(ReadOnlyArtifactAdmin):
     list_display = ("source_video", "sequence", "start_seconds", "duration_seconds")
     search_fields = ("text", "source_video__youtube_video_id")
     ordering = ("source_video", "sequence")
 
 
 @admin.register(LegacyImportConflict)
-class LegacyImportConflictAdmin(admin.ModelAdmin):
+class LegacyImportConflictAdmin(ReadOnlyArtifactAdmin):
     list_display = (
         "legacy_scraped_video_id",
         "legacy_transcript_entry_id",
@@ -73,7 +102,7 @@ class LegacyImportConflictAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
-        return request.method in {"GET", "HEAD", "OPTIONS"}
+        return False
 
     def has_delete_permission(self, request, obj=None):
         return False

@@ -69,8 +69,17 @@ class AnalysisViewIntegrationTests(TestCase):
         self.client.post(
             reverse("analysis:deselect_segment", args=[selections[1].pk])
         )
-        self.assertEqual(SegmentSelection.objects.count(), 1)
-        self.assertEqual(SegmentSelection.objects.get().order, 1)
+        self.assertEqual(SegmentSelection.objects.count(), 2)
+        self.assertEqual(SegmentSelection.objects.active().get().order, 1)
+        retired = SegmentSelection.objects.get(pk=selections[1].pk)
+        self.assertIsNotNone(retired.retired_at)
+        self.assertEqual(retired.retired_by, self.user)
+        dashboard = self.client.get(reverse("analysis:project_dashboard", args=[self.project.pk]))
+        self.assertEqual(list(dashboard.context["selections"]), list(SegmentSelection.objects.active()))
+        self.assertEqual(
+            self.client.post(reverse("analysis:deselect_segment", args=[retired.pk])).status_code,
+            404,
+        )
 
     def test_sorting_does_not_change_persisted_selection_order(self):
         run = self.run_analysis()

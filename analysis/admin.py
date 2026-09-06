@@ -1,9 +1,10 @@
 from django.contrib import admin
+from scraper.admin import ReadOnlyArtifactAdmin, ReadOnlyArtifactInline
 
 from .models import AnalysisRun, AnalysisSegment, SegmentSelection
 
 
-class AnalysisSegmentInline(admin.TabularInline):
+class AnalysisSegmentInline(ReadOnlyArtifactInline):
     model = AnalysisSegment
     extra = 0
     fields = ("order", "title", "start_seconds", "end_seconds", "aggregate_score")
@@ -12,7 +13,7 @@ class AnalysisSegmentInline(admin.TabularInline):
 
 
 @admin.register(AnalysisRun)
-class AnalysisRunAdmin(admin.ModelAdmin):
+class AnalysisRunAdmin(ReadOnlyArtifactAdmin):
     list_display = (
         "source_video",
         "version",
@@ -35,14 +36,14 @@ class AnalysisRunAdmin(admin.ModelAdmin):
 
 
 @admin.register(AnalysisSegment)
-class AnalysisSegmentAdmin(admin.ModelAdmin):
+class AnalysisSegmentAdmin(ReadOnlyArtifactAdmin):
     list_display = ("analysis_run", "order", "title", "aggregate_score")
     ordering = ("analysis_run", "order")
     search_fields = ("title", "summary", "source_text")
 
 
 @admin.register(SegmentSelection)
-class SegmentSelectionAdmin(admin.ModelAdmin):
-    list_display = ("project", "order", "analysis_segment", "selected_by", "updated_at")
+class SegmentSelectionAdmin(ReadOnlyArtifactAdmin):
+    list_display = ("project", "order", "analysis_segment", "selected_by", "retired_at", "updated_at")
     ordering = ("project", "order")
     search_fields = ("project__title", "analysis_segment__title")

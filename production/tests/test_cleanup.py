@@ -1,6 +1,9 @@
 import tempfile
 from datetime import timedelta
 from io import StringIO
+from unittest.mock import patch
+from django.db import transaction
+from production.services.access import ProductionValidationError
 
 from django.core.files.base import ContentFile
 from django.core.management import call_command
@@ -74,10 +77,59 @@ class MediaCleanupTests(TestCase):
         )
         removed_path = removable.file.path
 
-        removed = MediaCleanupService.cleanup(30, execute=True)
+        with self.captureOnCommitCallbacks(execute=True):
+            removed = MediaCleanupService.cleanup(30, execute=True)
 
         self.assertEqual([item[0] for item in removed], [removable.pk])
         self.assertFalse(MediaAsset.objects.filter(pk=removable.pk).exists())
         self.assertFalse(removable.file.storage.exists(removable.file.name))
         self.assertTrue(MediaAsset.objects.filter(pk=protected.pk).exists())
         self.assertNotEqual(removed_path, "")
+
+
+    def test_cleanup_retains_source_media_referenced_by_retired_clip_history(self):
+        from .helpers import create_selected_segment, create_source_upload
+        from production.services.clips import SourceClipService
+        from analysis.services.selection import SelectionService
+        user, project, _, selection = create_selected_segment("cleanup-history-owner")
+        asset = create_source_upload(project, user)
+        clip, _ = SourceClipService().enqueue_clip(selection, asset, user)
+        SelectionService.deselect(project, selection, user)
+        MediaAsset.objects.filter(pk=asset.pk).update(status=MediaAsset.Status.FAILED,
+            updated_at=timezone.now() - timedelta(days=40))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(MediaCleanupService.cleanup(30, execute=True), [])
+        self.assertTrue(MediaAsset.objects.filter(pk=asset.pk).exists())
+        self.assertTrue(asset.file.storage.exists(asset.file.name))
+
+    def test_cleanup_rechecks_new_dependency_before_deleting_candidate(self):
+        asset = self.old_asset(MediaAsset.Status.FAILED, "late-reference")
+        source = SourceVideo.objects.create(project=self.project,
+            youtube_url="https://youtu.be/dQw4w9WgXcQ", youtube_video_id="dQw4w9WgXcQ", title="Source")
+        ArtifactDependencyService.link(self.project, source, asset, self.user,
+            upstream_version=1, upstream_fingerprint="a"*64, downstream_version=1,
+            relation_type="generated_from")
+        with patch.object(MediaCleanupService, "candidates", return_value=[asset]):
+            self.assertEqual(MediaCleanupService.cleanup(30, execute=True), [])
+        self.assertTrue(asset.file.storage.exists(asset.file.name))
+
+    def test_outer_rollback_keeps_row_and_file(self):
+        asset = self.old_asset(MediaAsset.Status.FAILED, "rollback")
+        with self.captureOnCommitCallbacks(execute=True):
+            with self.assertRaises(RuntimeError):
+                with transaction.atomic():
+                    MediaCleanupService.cleanup(30, execute=True)
+                    raise RuntimeError("outer operation failed")
+        self.assertTrue(MediaAsset.objects.filter(pk=asset.pk).exists())
+        self.assertTrue(asset.file.storage.exists(asset.file.name))
+
+    def test_late_dependency_cannot_reference_deleted_asset(self):
+        asset = self.old_asset(MediaAsset.Status.FAILED, "deleted")
+        source = SourceVideo.objects.create(project=self.project,
+            youtube_url="https://youtu.be/dQw4w9WgXcQ", youtube_video_id="dQw4w9WgXcQ", title="Source")
+        with self.captureOnCommitCallbacks(execute=True):
+            MediaCleanupService.cleanup(30, execute=True)
+        with self.assertRaises(ProductionValidationError):
+            ArtifactDependencyService.link(self.project, source, asset, self.user,
+                upstream_version=1, upstream_fingerprint="a"*64, downstream_version=1,
+                relation_type="generated_from")

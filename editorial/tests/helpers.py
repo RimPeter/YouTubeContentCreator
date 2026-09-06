@@ -1,22 +1,35 @@
 from decimal import Decimal
+from hashlib import sha256
 
+from django.core.files.base import ContentFile
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from production.models import MediaAsset, PipelineJob, SourceClip
 from production.tests.helpers import create_selected_segment, create_source_upload
 
 
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class EditorialTestCase(TestCase):
+    """Keep every editorial fixture upload out of the user's media directory."""
+
+
 def create_approved_clip(username="editorial-owner"):
     user, project, source, selection = create_selected_segment(username)
     source_asset = create_source_upload(project, user)
+    source_asset.checksum_sha256 = sha256(b"source-video").hexdigest()
+    source_asset.save(update_fields=["checksum_sha256"])
     processed = MediaAsset.objects.create(
         project=project,
         kind=MediaAsset.Kind.SOURCE_CLIP,
         status=MediaAsset.Status.APPROVED,
         display_name="Approved source clip",
         file=f"projects/{project.pk}/source_clip/clip.mp4",
-        checksum_sha256="c" * 64,
-        byte_size=12,
+        checksum_sha256=sha256(b"editorial-fixture").hexdigest(),
+        byte_size=len(b"editorial-fixture"),
         duration_seconds=Decimal("2.000"),
         width=320,
         height=180,
@@ -60,6 +73,12 @@ def create_approved_clip(username="editorial-owner"):
         approved_by=user,
         approved_at=timezone.now(),
     )
+    processed.file.save("fixture.mp4", ContentFile(b"editorial-fixture"), save=True)
+    clip.refresh_from_db()
+    from production.services.clips import SourceClipService
+
+    clip.input_fingerprint = SourceClipService.current_input_fingerprint(clip)
+    clip.save(update_fields=["input_fingerprint"])
     return user, project, source, selection, clip
 
 

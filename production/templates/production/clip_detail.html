@@ -5,6 +5,18 @@
 <p><a href="{% url 'production:project_clips' clip.project.pk %}">Back to {{ clip.project.title }} source clips</a></p>
 {% if clip.status == "approved" %}<p><a class="button" href="{% url 'editorial:project_editorial' clip.project.pk %}">Research and reaction drafting</a></p>{% endif %}
 <p>Status: {{ clip.get_status_display }} · Job: {{ clip.pipeline_job.get_status_display }}</p>
+<p><a href="{% url 'production:project_jobs' clip.project_id %}">View processing jobs</a></p>
+{% if clip.pipeline_job.status == "queued" or clip.pipeline_job.status == "running" %}
+<div class="card" role="status">{{ clip.pipeline_job.get_status_display }} · {{ clip.pipeline_job.progress }}%. Refresh this page to check progress.</div>
+<form method="post" action="{% url 'production:cancel_job' clip.pipeline_job_id %}">{% csrf_token %}<button class="danger">Cancel processing</button></form>
+{% elif can_retry and can_regenerate %}
+<form method="post" action="{% url 'production:retry_job' clip.pipeline_job_id %}">{% csrf_token %}<button>Retry processing</button></form>
+{% endif %}
+{% if clip.status == "stale" or clip.status == "superseded" or clip.status == "failed" %}
+<div class="card">This version is kept in your history.
+{% if can_regenerate %}<a href="{% url 'production:project_clips' clip.project_id %}">Choose current inputs and queue a new version.</a>
+{% else %}<a href="{% url 'analysis:project_dashboard' clip.project_id %}">Review your project and active selections.</a>{% endif %}</div>
+{% endif %}
 {% if is_stale %}<div class="card">This clip is stale because its selected input changed. Regenerate it before approval.</div>{% endif %}
 
 {% if clip.processed_asset %}

@@ -1,4 +1,5 @@
 import subprocess
+import time
 
 from django.conf import settings
 
@@ -14,9 +15,42 @@ class FFmpegClient:
         self.executable = executable or settings.FFMPEG_EXECUTABLE
         self.timeout_seconds = timeout_seconds or settings.FFMPEG_TIMEOUT_SECONDS
         self.runner = runner or subprocess.run
+        self.check_active = None
+
+    def _run_monitored(self, arguments):
+        command = [self.executable, *arguments]
+        self.check_active()
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        deadline = time.monotonic() + self.timeout_seconds
+        interval = max(0.1, min(float(getattr(settings, "PIPELINE_HEARTBEAT_SECONDS", 5)),
+                                float(getattr(settings, "PIPELINE_LEASE_SECONDS", 30)) / 3))
+        try:
+            while True:
+                self.check_active()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, self.timeout_seconds)
+                try:
+                    stdout, stderr = process.communicate(timeout=min(interval, remaining))
+                    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.communicate(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
 
     def _run(self, arguments):
         try:
+            if self.check_active is not None:
+                return self._run_monitored(arguments)
             return self.runner(
                 [self.executable, *arguments],
                 capture_output=True,

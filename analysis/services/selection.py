@@ -1,8 +1,12 @@
+import math
+
 from django.db import transaction
 from django.db.models import Max
+from django.utils import timezone
 
 from analysis.models import AnalysisRun, AnalysisSegment, SegmentSelection
 from scraper.models import VideoProject
+from scraper.services import lock_project
 
 from .analysis import AnalysisService
 
@@ -24,6 +28,13 @@ class SelectionValidationError(SelectionServiceError):
 
 
 class SelectionService:
+    @staticmethod
+    def _current_project(project):
+        try:
+            return lock_project(project.pk)
+        except VideoProject.DoesNotExist as exc:
+            raise SelectionLifecycleError("The project no longer exists.") from exc
+
     @staticmethod
     def ensure_user_access(project, user):
         if not user.is_authenticated or (
@@ -50,6 +61,8 @@ class SelectionService:
             reviewed_end = float(reviewed_end)
         except (TypeError, ValueError) as exc:
             raise SelectionValidationError("Reviewed boundaries must be numeric.") from exc
+        if not math.isfinite(reviewed_start) or not math.isfinite(reviewed_end):
+            raise SelectionValidationError("Reviewed boundaries must be finite numbers.")
         if reviewed_start < segment.start_seconds or reviewed_end > segment.end_seconds:
             raise SelectionValidationError("Reviewed boundaries must remain within the segment.")
         if reviewed_end < reviewed_start:
@@ -66,7 +79,7 @@ class SelectionService:
         notes="",
     ):
         with transaction.atomic():
-            project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            project = cls._current_project(project)
             cls.ensure_selection_allowed(project, user)
             segment = AnalysisSegment.objects.select_related(
                 "analysis_run__source_video__project"
@@ -77,7 +90,7 @@ class SelectionService:
                 raise SelectionValidationError("Only successful analysis segments may be selected.")
             if AnalysisService.is_stale(segment.analysis_run):
                 raise SelectionValidationError("This analysis is stale and must be rerun.")
-            conflicting_run = SegmentSelection.objects.filter(
+            conflicting_run = SegmentSelection.objects.active().filter(
                 project=project,
                 analysis_segment__analysis_run__source_video=segment.analysis_run.source_video,
             ).exclude(analysis_segment__analysis_run=segment.analysis_run)
@@ -86,7 +99,7 @@ class SelectionService:
                     "Clear selections from the previous run for this source before selecting a new run."
                 )
             cls._validate_reviewed_boundaries(segment, reviewed_start, reviewed_end)
-            existing = SegmentSelection.objects.filter(
+            existing = SegmentSelection.objects.active().filter(
                 project=project,
                 analysis_segment=segment,
             ).first()
@@ -109,7 +122,7 @@ class SelectionService:
                 SourceClipService.invalidate_selection_outputs(existing, user)
                 return existing, False
             next_order = (
-                SegmentSelection.objects.filter(project=project).aggregate(latest=Max("order"))[
+                SegmentSelection.objects.active().filter(project=project).aggregate(latest=Max("order"))[
                     "latest"
                 ]
                 or 0
@@ -128,13 +141,21 @@ class SelectionService:
     @classmethod
     def deselect(cls, project, selection, user):
         with transaction.atomic():
-            project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            project = cls._current_project(project)
             cls.ensure_selection_allowed(project, user)
-            selection = SegmentSelection.objects.get(pk=selection.pk, project=project)
+            try:
+                selection = SegmentSelection.objects.active().get(pk=selection.pk, project=project)
+            except SegmentSelection.DoesNotExist as exc:
+                raise SelectionValidationError("This selection is no longer active.") from exc
             removed_order = selection.order
-            selection.delete()
+            selection.retired_at = timezone.now()
+            selection.retired_by = user
+            selection.save(update_fields=["retired_at", "retired_by", "updated_at"])
+            from production.services.clips import SourceClipService
+
+            SourceClipService.invalidate_selection_outputs(selection, user)
             later = list(
-                SegmentSelection.objects.filter(project=project, order__gt=removed_order).order_by(
+                SegmentSelection.objects.active().filter(project=project, order__gt=removed_order).order_by(
                     "order"
                 )
             )
@@ -145,7 +166,7 @@ class SelectionService:
     @classmethod
     def reorder(cls, project, ordered_selection_ids, user):
         with transaction.atomic():
-            project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            project = cls._current_project(project)
             cls.ensure_selection_allowed(project, user)
             try:
                 requested_ids = [int(value) for value in ordered_selection_ids]
@@ -153,11 +174,11 @@ class SelectionService:
                 raise SelectionValidationError("Selection order contains invalid IDs.") from exc
             if len(requested_ids) != len(set(requested_ids)):
                 raise SelectionValidationError("Selection order contains duplicate IDs.")
-            current = list(SegmentSelection.objects.filter(project=project).order_by("order"))
+            current = list(SegmentSelection.objects.active().filter(project=project).order_by("order"))
             if set(requested_ids) != {item.pk for item in current}:
                 raise SelectionValidationError("Selection order must contain every current selection.")
             by_id = {item.pk: item for item in current}
-            offset = len(current) + 10
+            offset = max((item.order for item in current), default=0) + 1
             for item in current:
                 item.order += offset
                 item.save(update_fields=["order", "updated_at"])

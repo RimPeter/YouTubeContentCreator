@@ -1,0 +1,19 @@
+{% extends "scraper/base.html" %}
+{% block title %}Processing · {{ project.title }}{% endblock %}
+{% block content %}
+<h1>Processing jobs</h1>
+<p><a href="{% url 'project_detail' project.pk %}">{{ project.title }}</a> · <a href="{% url 'production:project_clips' project.pk %}">Source clips</a></p>
+<p class="muted">Clips and AI research are processed in the background. Refresh to see the latest progress.</p>
+{% for job in jobs %}
+<article class="card">
+    <h2>{% if job.job_type == "ai_research" %}<a href="{% url 'editorial:research_detail' job.input_snapshot.package_id %}">AI research · job {{ job.pk }}</a>{% elif job.source_clip %}<a href="{% url 'production:clip_detail' job.source_clip.pk %}">Clip {{ job.source_clip.version }} · {{ job.source_clip.selected_segment.analysis_segment.title }}</a>{% else %}Job {{ job.pk }}{% endif %}</h2>
+    <p>{{ job.get_status_display }} · {{ job.progress }}% · Attempt {{ job.attempt_count }} of {{ job.max_attempts }}</p>
+    {% if job.error_message %}<p role="status">{{ job.error_message }}</p>{% endif %}
+    {% if job.status == "queued" or job.status == "running" %}
+    <form method="post" action="{% url 'production:cancel_job' job.pk %}">{% csrf_token %}<button class="danger">Cancel processing</button></form>
+    {% elif job.status == "failed" and job.attempt_count < job.max_attempts and project.status == "approved" and not project.is_locked %}
+    <form method="post" action="{% url 'production:retry_job' job.pk %}">{% csrf_token %}<button>Retry processing</button></form>
+    {% endif %}
+</article>
+{% empty %}<p>No processing jobs yet.</p>{% endfor %}
+{% endblock %}

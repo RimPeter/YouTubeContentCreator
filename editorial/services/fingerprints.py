@@ -24,9 +24,12 @@ def research_fingerprint(package):
             "evidence": [
                 {
                     "id": evidence.pk,
+                    "title": evidence.title,
+                    "publisher": evidence.publisher,
                     "url": evidence.source_url,
                     "classification": evidence.classification,
                     "finding": evidence.finding,
+                    "relevance": evidence.relevance,
                     "verification": evidence.verification_status,
                 }
                 for evidence in package.evidence_sources.order_by("pk")

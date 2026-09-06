@@ -1,217 +1,39 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Creator Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #f5f7fa;
-        }
-
-        header {
-            background: white;
-            border-bottom: 1px solid #e0e0e0;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        nav {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .logo {
-            font-size: 20px;
-            font-weight: 700;
-            color: #667eea;
-            text-decoration: none;
-        }
-
-        nav ul {
-            list-style: none;
-            display: flex;
-            gap: 30px;
-            align-items: center;
-        }
-
-        nav a {
-            color: #333;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 14px;
-            transition: color 0.3s;
-        }
-
-        nav a:hover {
-            color: #667eea;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }
-
-        h1 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 32px;
-        }
-
-        .intro {
-            color: #666;
-            font-size: 16px;
-            margin-bottom: 40px;
-            max-width: 600px;
-            line-height: 1.6;
-        }
-
-        .cards-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 25px;
-            margin-bottom: 40px;
-        }
-
-        .card {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-            transition: transform 0.3s, box-shadow 0.3s;
-            cursor: pointer;
-            text-decoration: none;
-            color: inherit;
-        }
-
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
-        }
-
-        .card-icon {
-            font-size: 40px;
-            margin-bottom: 15px;
-        }
-
-        .card h2 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 20px;
-        }
-
-        .card p {
-            color: #666;
-            font-size: 14px;
-            line-height: 1.6;
-        }
-
-        .features {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-        }
-
-        .features h2 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 20px;
-        }
-
-        .features ul {
-            list-style: none;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-        }
-
-        .features li {
-            color: #666;
-            font-size: 14px;
-            padding-left: 25px;
-            position: relative;
-            line-height: 1.6;
-        }
-
-        .features li:before {
-            content: "✓";
-            position: absolute;
-            left: 0;
-            color: #667eea;
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <header>
-        <nav>
-            <a href="/" class="logo">🎬 Creator Studio</a>
-            <ul>
-                <li><a href="/">Dashboard</a></li>
-                <li><a href="/scraper/">Scraper</a></li>
-                {% if user.is_authenticated %}
-                    <li><a href="/accounts/profile/">Profile</a></li>
-                    <li><a href="/accounts/logout/">Sign Out</a></li>
-                {% else %}
-                    <li><a href="/accounts/login/">Sign In</a></li>
-                {% endif %}
-            </ul>
-        </nav>
-    </header>
-
-    <div class="container">
-        <h1>Welcome to Creator Studio</h1>
-        <p class="intro">
-            Your all-in-one platform for YouTube content creation. Extract transcripts, analyze videos, and manage your creative projects all in one place.
-        </p>
-
-        <div class="cards-grid">
-            <a href="/scraper/" class="card">
-                <div class="card-icon">🎥</div>
-                <h2>Transcript Scraper</h2>
-                <p>Extract timestamped transcripts directly from YouTube videos in seconds.</p>
-            </a>
-
-            <div class="card">
-                <div class="card-icon">📊</div>
-                <h2>Analytics</h2>
-                <p>Coming soon: Track video performance, engagement metrics, and audience insights.</p>
-            </div>
-
-            <div class="card">
-                <div class="card-icon">✂️</div>
-                <h2>Video Editor</h2>
-                <p>Coming soon: Edit clips, add reactions, and create compilations directly in the platform.</p>
-            </div>
+{% extends "scraper/base.html" %}
+{% block title %}Dashboard · Creator Studio{% endblock %}
+{% block content %}
+{% if user.is_authenticated %}
+<div class="page-heading">
+    <div><p class="eyebrow">Creator Studio</p><h1>Your workspace</h1><p class="muted">{% if staff_scope %}Staff view: projects across all accounts.{% else %}Take each project from transcript to reviewed reaction.{% endif %}</p></div>
+    <a class="button" href="{% url 'project_create' %}">New project</a>
+</div>
+<dl class="metrics" aria-label="Active project summary">
+    <div class="card"><dt>Active projects</dt><dd>{{ summary.active_projects }}</dd></div>
+    <div class="card"><dt>Pending reviews</dt><dd>{{ summary.pending_reviews }}</dd></div>
+    <div class="card"><dt>Queued or running</dt><dd>{{ summary.processing_jobs }}</dd></div>
+    <div class="card"><dt>Failed jobs</dt><dd>{{ summary.failed_jobs }}</dd></div>
+</dl>
+<section aria-labelledby="projects-title">
+    <div class="page-heading"><h2 id="projects-title">Recent projects</h2><a href="{% url 'project_list' %}">View all projects{% if archived_count %} ({{ archived_count }} archived){% endif %}</a></div>
+    {% for row in project_rows %}
+    <article class="card">
+        <div class="page-heading">
+            <div><h3><a href="{% url 'project_detail' row.project.pk %}">{{ row.project.title }}</a></h3><p class="muted">{{ row.project.get_status_display }}{% if row.project.is_locked %} · Locked{% endif %}{% if staff_scope %} · {{ row.project.owner.username }}{% endif %} · Updated {{ row.project.updated_at|date:"j M Y, H:i" }}</p></div>
+            <a class="button" href="{{ row.next_url }}">{{ row.next_label }}</a>
         </div>
-
-        <div class="features">
-            <h2>Platform Features</h2>
-            <ul>
-                <li>Extract and organize YouTube transcripts</li>
-                <li>Timestamped transcript data for precision editing</li>
-                <li>Manage multiple video projects</li>
-                <li>Secure user authentication</li>
-                <li>Fast and reliable processing</li>
-                <li>Export transcript data in multiple formats</li>
-            </ul>
-        </div>
-    </div>
-</body>
-</html>
+        <p>{{ row.source_count }} transcript{{ row.source_count|pluralize }} · {{ row.selection_count }} selected segment{{ row.selection_count|pluralize }} · {{ row.approved_reactions }} approved reaction{{ row.approved_reactions|pluralize }}</p>
+        {% if row.pending %}<p><strong>{{ row.pending }} review{{ row.pending|pluralize }} pending.</strong> Open the next step to review the current results.</p>{% endif %}
+        {% if row.processing %}<p><a href="{% url 'production:project_jobs' row.project.pk %}">{{ row.processing }} job{{ row.processing|pluralize }} queued or running</a></p>{% endif %}
+        {% if row.failed %}<p class="attention"><a href="{% url 'production:project_jobs' row.project.pk %}">{{ row.failed }} failed job{{ row.failed|pluralize }} in history</a>. Review the error and retry eligible work.</p>{% endif %}
+        {% if row.analysis_failed %}<p class="attention">Analysis needs attention. <a href="{% url 'analysis:project_dashboard' row.project.pk %}">Review and run analysis again</a>.</p>{% endif %}
+        {% if row.stale %}<p class="attention">{{ row.stale }} current result{{ row.stale|pluralize }} became stale because an input changed. Regenerate the affected clips or editorial work before approval.</p>{% endif %}
+        <div class="project-links"><a href="{% url 'analysis:project_dashboard' row.project.pk %}">Analysis &amp; selections</a><a href="{% url 'production:project_clips' row.project.pk %}">Clips</a><a href="{% url 'editorial:project_editorial' row.project.pk %}">Research &amp; reactions</a><a href="{% url 'production:project_jobs' row.project.pk %}">Jobs</a></div>
+    </article>
+    {% empty %}
+    <div class="card"><h3>Start with a video you want to explore</h3><p>Create a project, add a YouTube transcript, and review it before choosing your clips.</p><a class="button" href="{% url 'project_create' %}">Create your first project</a></div>
+    {% endfor %}
+</section>
+{% else %}
+<div class="card welcome"><p class="eyebrow">Creator Studio</p><h1>Build a reaction with evidence</h1><p>Collect transcripts, choose segments, create clips from your source media, and review the research and reaction script in one workspace.</p><p><a class="button" href="{% url 'account_login' %}">Sign in</a> <a href="{% url 'account_signup' %}">Create an account</a></p></div>
+{% endif %}
+<aside class="card" aria-labelledby="generation-note"><h2 id="generation-note">About generated suggestions</h2><p>Analysis and reaction drafts currently use built-in suggestions. A live AI provider is not connected through this interface. Review every draft, verify the evidence, and edit the script before approving it.</p></aside>
+{% endblock %}

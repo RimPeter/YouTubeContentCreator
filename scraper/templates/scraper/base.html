@@ -3,11 +3,19 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}YouTube Content Creator{% endblock %}</title>
+    <title>{% block title %}Creator Studio{% endblock %}</title>
     <style>
-        body { font-family: system-ui, sans-serif; margin: 0; color: #1f2937; background: #f8fafc; }
-        nav { background: #111827; padding: 1rem; }
-        nav a { color: white; margin-right: 1rem; text-decoration: none; }
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; margin: 0; color: #1f2937; background: #f8fafc; line-height: 1.55; }
+        nav { background: #111827; padding: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.5rem; }
+        nav a { color: white; text-decoration: none; }
+        nav a:hover, a:hover { text-decoration: underline; }
+        nav a[aria-current="page"] { text-decoration: underline; text-underline-offset: .4rem; }
+        .brand { font-weight: 700; margin-right: auto; }
+        a { color: #1d4ed8; overflow-wrap: anywhere; }
+        a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid #d97706; outline-offset: 4px; }
+        .skip-link { position: absolute; top: -5rem; left: 1rem; padding: .7rem; background: white; z-index: 10; }
+        .skip-link:focus { top: .5rem; }
         main { max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
         .card { background: white; border: 1px solid #e5e7eb; border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
         .messages { list-style: none; padding: 0; }
@@ -15,22 +23,54 @@
         form.inline { display: inline-block; margin-right: .5rem; }
         button, .button { background: #2563eb; border: 0; border-radius: .25rem; color: white; cursor: pointer; display: inline-block; padding: .55rem .8rem; text-decoration: none; }
         button.danger { background: #b91c1c; }
-        input, textarea { box-sizing: border-box; display: block; margin: .25rem 0 1rem; max-width: 100%; padding: .5rem; width: 32rem; }
-        .muted { color: #64748b; }
+        input, textarea, select { font: inherit; box-sizing: border-box; display: block; margin: .25rem 0 1rem; max-width: 100%; padding: .5rem; width: 32rem; }
+        input[type="checkbox"], input[type="radio"] { width: auto; display: inline-block; margin-right: .5rem; }
+        input[type="hidden"] { display: none; }
+        button { font: inherit; }
+        button:disabled { opacity: .55; cursor: default; }
+        .muted { color: #475569; }
         .chunk { border-top: 1px solid #e5e7eb; padding: .75rem 0; }
+        .page-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+        .page-heading h1, .page-heading h2, .page-heading h3 { margin: .25rem 0; }
+        .page-heading p { margin: .4rem 0; }
+        .eyebrow { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #475569; }
+        .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+        .metrics .card { margin: 0; }
+        .metrics dd { font-size: 2rem; font-weight: 700; margin: .3rem 0 0; }
+        .metrics dt { color: #475569; font-size: .9rem; }
+        .project-links { display: flex; flex-wrap: wrap; gap: .7rem 1.5rem; margin-top: 1rem; }
+        .attention, .errorlist { color: #9a3412; }
+        .auth-card { max-width: 36rem; margin: 3rem auto; }
+        .welcome { padding: 2rem; }
+        .welcome p { max-width: 42rem; }
+        pre { overflow: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: .5rem; text-align: left; overflow-wrap: anywhere; }
+        @media (max-width: 650px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .page-heading { align-items: flex-start; } .brand { width: 100%; } }
     </style>
+    {% block extra_head %}{% endblock %}
 </head>
 <body>
-<nav>
-    <a href="{% url 'dashboard' %}">Dashboard</a>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<nav aria-label="Main navigation">
+    <a class="brand" href="{% url 'dashboard' %}">Creator Studio</a>
+    <a href="{% url 'dashboard' %}"{% if request.resolver_match.url_name == 'dashboard' %} aria-current="page"{% endif %}>Dashboard</a>
+    {% if user.is_authenticated %}
     <a href="{% url 'project_list' %}">Projects</a>
     <a href="{% url 'source_video_list' %}">Saved transcripts</a>
+    <a href="{% url 'profile' %}">Profile</a>
+    <a href="{% url 'account_logout' %}">Sign out</a>
+    {% else %}
+    <a href="{% url 'account_login' %}">Sign in</a>
+    <a href="{% url 'account_signup' %}">Create account</a>
+    {% endif %}
 </nav>
-<main>
+<main id="main-content" tabindex="-1">
     {% if messages %}
-        <ul class="messages">{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>
+        <ul class="messages" aria-live="polite">{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>
     {% endif %}
     {% block content %}{% endblock %}
 </main>
+{% block extra_body %}{% endblock %}
 </body>
 </html>

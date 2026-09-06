@@ -1,9 +1,11 @@
 from django.contrib import messages
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.urls import reverse
+from django.views.decorators.http import require_POST, require_http_methods
 
-from production.models import SourceClip
+from production.models import SourceClip, PipelineJob
 from scraper.models import VideoProject
 
 from .forms import EvidenceSourceForm, ReactionBlockForm, ReactionClaimForm, ResearchPackageForm
@@ -11,6 +13,8 @@ from .models import EvidenceSource, ReactionBlock, ReactionClaim, ResearchPackag
 from .services.access import EditorialServiceError
 from .services.reactions import ReactionService
 from .services.research import ResearchService
+from .services.research_suggestions import suggestions_for_clip
+from .services.ai_research import AIResearchService, render_report
 
 
 def _owned(queryset, user):
@@ -54,9 +58,28 @@ def project_editorial(request, project_pk):
 
 
 @login_required
-@require_POST
+def research_suggestions(request, clip_pk):
+    clip = get_object_or_404(
+        clip_qs(request.user).select_related("selected_segment__analysis_segment"), pk=clip_pk,
+    )
+    try:
+        suggestions = suggestions_for_clip(clip, request.user)
+    except EditorialServiceError as exc:
+        messages.error(request, str(exc))
+        return redirect("editorial:project_editorial", clip.project_id)
+    return render(request, "editorial/research_suggestions.html", {
+        "clip": clip, "suggestions": suggestions,
+        "transcript": clip.selected_segment.analysis_segment.source_text,
+    })
+
+
+@login_required
+@require_http_methods(["GET", "HEAD", "POST"])
 def create_research(request, clip_pk):
     clip = get_object_or_404(clip_qs(request.user), pk=clip_pk)
+    if request.method in {"GET", "HEAD"}:
+        url = reverse("editorial:project_editorial", args=[clip.project_id])
+        return redirect(f"{url}#research-clip-{clip.pk}")
     form = ResearchPackageForm(request.POST)
     if form.is_valid():
         try:
@@ -73,10 +96,25 @@ def create_research(request, clip_pk):
 @login_required
 def research_detail(request, package_pk):
     package = get_object_or_404(package_qs(request.user), pk=package_pk)
+    job = PipelineJob.objects.filter(
+        project_id=package.project_id, job_type="ai_research", input_snapshot__package_id=package.pk,
+    ).order_by("-created_at").first()
+    report = package.configuration_snapshot.get("ai_research_report", {})
     return render(request, "editorial/research_detail.html", {
         "package": package, "evidence_form": EvidenceSourceForm(),
         "reactions": package.reaction_blocks.all(),
+        "research_job": job, "ai_configured": bool(settings.OPENAI_API_KEY),
+        "ai_report": render_report(report) if report else "",
     })
+
+
+@login_required
+@require_POST
+def run_ai_research(request, package_pk):
+    package = get_object_or_404(package_qs(request.user), pk=package_pk)
+    return _result(request, lambda: AIResearchService.enqueue(package, request.user),
+                   "AI research requested. Follow its progress below; completed results are reused.",
+                   "editorial:research_detail", package.pk)
 
 
 @login_required
@@ -153,7 +191,7 @@ def generate_reaction(request, package_pk):
 def reaction_detail(request, block_pk):
     block = get_object_or_404(block_qs(request.user), pk=block_pk)
     return render(request, "editorial/reaction_detail.html", {
-        "block": block, "edit_form": ReactionBlockForm(block=block),
+        "reaction": block, "edit_form": ReactionBlockForm(block=block),
         "claim_form": ReactionClaimForm(block=block),
     })
 

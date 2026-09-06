@@ -18,7 +18,7 @@ class ProductionValidationError(ProductionServiceError):
 
 
 def ensure_project_access(project, user):
-    if not user or not user.is_authenticated or (
+    if not user or not user.is_authenticated or not user.is_active or (
         project.owner_id != user.pk and not user.is_staff and not user.is_superuser
     ):
         raise ProductionPermissionError("You cannot access production data for this project.")

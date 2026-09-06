@@ -133,7 +133,7 @@ class ProductionViewTests(TestCase):
 
     @patch("production.views.SourceClipService")
     def test_create_and_approve_are_post_only(self, service_class):
-        service_class.return_value.create_clip.return_value = (self.clip, True)
+        service_class.return_value.enqueue_clip.return_value = (self.clip, True)
         response = self.client.post(
             reverse("production:create_source_clip", args=[self.selection.pk]),
             {

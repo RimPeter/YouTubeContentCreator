@@ -4,6 +4,7 @@ from django.utils import timezone
 
 from analysis.models import AnalysisRun, AnalysisSegment
 from scraper.models import SourceVideo, VideoProject
+from scraper.services import lock_project
 
 from .fingerprinting import fingerprint_chunks, fingerprint_source_video, ordered_transcript_chunks
 from .validation import (
@@ -76,10 +77,15 @@ class AnalysisService:
         for attempt in range(2):
             try:
                 with transaction.atomic():
-                    locked_source = SourceVideo.objects.select_for_update().select_related(
-                        "project"
-                    ).get(pk=source_video.pk)
+                    try:
+                        project = lock_project(source_video.project_id)
+                        locked_source = SourceVideo.objects.get(pk=source_video.pk, project=project)
+                    except (VideoProject.DoesNotExist, SourceVideo.DoesNotExist) as exc:
+                        raise AnalysisInputError("The analysis source no longer exists.") from exc
+                    locked_source.project = project
                     self.ensure_analysis_allowed(locked_source, user)
+                    if fingerprint_source_video(locked_source) != fingerprint:
+                        raise AnalysisInputError("The transcript changed before analysis started. Try again.")
                     latest_version = (
                         AnalysisRun.objects.filter(source_video=locked_source).aggregate(
                             latest=Max("version")
@@ -159,6 +165,15 @@ class AnalysisService:
 
         try:
             with transaction.atomic():
+                try:
+                    project = lock_project(source_video.project_id)
+                    current_source = SourceVideo.objects.get(pk=source_video.pk, project=project)
+                except (VideoProject.DoesNotExist, SourceVideo.DoesNotExist) as exc:
+                    raise AnalysisInputError("The analysis source no longer exists.") from exc
+                current_source.project = project
+                self.ensure_analysis_allowed(current_source, user)
+                if fingerprint_source_video(current_source) != run.source_fingerprint:
+                    raise AnalysisInputError("The transcript changed during analysis. Run analysis again.")
                 AnalysisSegment.objects.bulk_create(
                     [
                         AnalysisSegment(
@@ -182,7 +197,7 @@ class AnalysisService:
                 run.status = AnalysisRun.Status.SUCCEEDED
                 run.used_fallback = used_fallback
                 run.completed_at = timezone.now()
-                if provider_failed:
+                if provider_failed and used_fallback:
                     run.error_code = "provider_fallback"
                     run.error_message = (
                         "Provider output failed validation; deterministic fallback was used."
@@ -196,6 +211,14 @@ class AnalysisService:
                         "error_message",
                     ]
                 )
+        except (AnalysisInputError, AnalysisPermissionError) as exc:
+            AnalysisRun.objects.filter(pk=run.pk).update(
+                status=AnalysisRun.Status.FAILED,
+                completed_at=timezone.now(),
+                error_code="input_changed",
+                error_message=str(exc),
+            )
+            raise
         except Exception as exc:
             AnalysisRun.objects.filter(pk=run.pk).update(
                 status=AnalysisRun.Status.FAILED,

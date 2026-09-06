@@ -22,6 +22,7 @@ from analysis.services.validation import (
     validate_provider_output,
 )
 from scraper.models import VideoProject
+from scraper.services import ProjectWorkflowService
 
 from .helpers import FakeProvider, create_approved_source, scores, valid_provider_output
 
@@ -74,6 +75,38 @@ class AnalysisServiceTests(TestCase):
         self.assertTrue(run.used_fallback)
         self.assertEqual(run.error_code, "")
         self.assertEqual(run.segments.count(), 2)
+
+    def test_successful_provider_retry_does_not_claim_fallback(self):
+        provider = FakeProvider([RuntimeError("temporary failure"), valid_provider_output()])
+        run = AnalysisService(provider).analyze(self.source, self.user)
+        self.assertEqual(provider.calls, 2)
+        self.assertFalse(run.used_fallback)
+        self.assertEqual(run.error_code, "")
+        self.assertEqual(run.error_message, "")
+
+    def test_archive_during_provider_call_prevents_publishing_segments(self):
+        provider = FakeProvider([valid_provider_output()])
+        with patch.object(provider, "analyze", side_effect=lambda *_args: (ProjectWorkflowService.archive(self.project), valid_provider_output())[1]):
+            with self.assertRaises(AnalysisInputError):
+                AnalysisService(provider).analyze(self.source, self.user)
+        run = AnalysisRun.objects.get()
+        self.assertEqual(run.status, AnalysisRun.Status.FAILED)
+        self.assertEqual(run.error_code, "input_changed")
+        self.assertFalse(run.segments.exists())
+
+    def test_transcript_changed_during_provider_call_prevents_publishing_segments(self):
+        provider = FakeProvider([valid_provider_output()])
+
+        def change_transcript(*_args):
+            self.source.transcript_chunks.filter(pk=self.chunks[0].pk).update(text="Changed")
+            return valid_provider_output()
+
+        with patch.object(provider, "analyze", side_effect=change_transcript):
+            with self.assertRaises(AnalysisInputError):
+                AnalysisService(provider).analyze(self.source, self.user)
+        run = AnalysisRun.objects.get()
+        self.assertEqual(run.status, AnalysisRun.Status.FAILED)
+        self.assertFalse(run.segments.exists())
 
     def test_persistence_failure_rolls_back_segments_and_marks_run_failed(self):
         provider = FakeProvider([valid_provider_output()])
@@ -242,3 +275,49 @@ class SelectionServiceTests(TestCase):
         self.chunks[0].save(update_fields=["text"])
         with self.assertRaises(SelectionValidationError):
             SelectionService.select(self.project, self.second, self.user)
+
+    def test_retirement_preserves_protected_clip_history_and_allows_reselection(self):
+        from production.models import MediaAsset, PipelineJob, SourceClip
+        from production.services.clips import SourceClipService
+
+        selected, _ = SelectionService.select(self.project, self.first, self.user)
+        source_asset = MediaAsset.objects.create(project=self.project, kind=MediaAsset.Kind.SOURCE_UPLOAD, status=MediaAsset.Status.VALIDATED, display_name="Source", created_by=self.user)
+        job = PipelineJob.objects.create(project=self.project, job_type="clip_trim", status=PipelineJob.Status.SUCCEEDED, idempotency_key="a" * 64, input_fingerprint="b" * 64, requested_by=self.user)
+        clip = SourceClip.objects.create(
+            project=self.project, selected_segment=selected, source_asset=source_asset,
+            pipeline_job=job, version=1, status=SourceClip.Status.VALIDATED,
+            input_fingerprint="c" * 64, requested_start_seconds=0, requested_end_seconds=4,
+            expected_duration_seconds=4, created_by=self.user,
+        )
+        clip.refresh_from_db()
+        clip.input_fingerprint = SourceClipService.current_input_fingerprint(clip)
+        clip.save(update_fields=["input_fingerprint"])
+        SelectionService.deselect(self.project, selected, self.user)
+        selected.refresh_from_db()
+        clip.refresh_from_db()
+        self.assertIsNotNone(selected.retired_at)
+        self.assertEqual(selected.retired_by, self.user)
+        self.assertEqual(clip.selected_segment_id, selected.pk)
+        self.assertEqual(clip.status, SourceClip.Status.STALE)
+        fresh, created = SelectionService.select(self.project, self.first, self.user)
+        self.assertTrue(created)
+        self.assertNotEqual(fresh.pk, selected.pk)
+        self.assertEqual(fresh.order, 1)
+        self.assertEqual(SegmentSelection.objects.count(), 2)
+        self.assertEqual(list(SegmentSelection.objects.active()), [fresh])
+
+    def test_retired_selections_do_not_block_new_run_or_reordering(self):
+        first, _ = SelectionService.select(self.project, self.first, self.user)
+        second, _ = SelectionService.select(self.project, self.second, self.user)
+        SelectionService.deselect(self.project, first, self.user)
+        SelectionService.reorder(self.project, [second.pk], self.user)
+        SelectionService.deselect(self.project, second, self.user)
+        next_run = AnalysisService(FakeProvider([valid_provider_output()])).analyze(self.source, self.user)
+        next_selection, created = SelectionService.select(self.project, next_run.segments.first(), self.user)
+        self.assertTrue(created)
+        self.assertEqual(next_selection.order, 1)
+        self.assertEqual(SegmentSelection.objects.count(), 3)
+        with self.assertRaises(SelectionValidationError):
+            SelectionService.deselect(self.project, first, self.user)
+        with self.assertRaises(SelectionValidationError):
+            SelectionService.reorder(self.project, [first.pk, next_selection.pk], self.user)

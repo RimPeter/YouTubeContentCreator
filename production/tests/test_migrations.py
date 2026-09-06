@@ -20,7 +20,8 @@ class ProductionInitialMigrationTests(TransactionTestCase):
         self.project_pk = project.pk
 
     def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
         super().tearDown()
 
     def test_additive_forward_and_reverse_preserve_project_data(self):

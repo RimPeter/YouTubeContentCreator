@@ -6,6 +6,9 @@ from . import views
 app_name = "production"
 
 urlpatterns = [
+    path("projects/<int:project_pk>/jobs/", views.project_jobs, name="project_jobs"),
+    path("jobs/<int:job_pk>/retry/", views.retry_job, name="retry_job"),
+    path("jobs/<int:job_pk>/cancel/", views.cancel_job, name="cancel_job"),
     path("projects/<int:project_pk>/clips/", views.project_clips, name="project_clips"),
     path(
         "projects/<int:project_pk>/source-media/upload/",

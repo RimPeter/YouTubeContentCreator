@@ -11,22 +11,62 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import secrets
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
+def env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if value.lower() not in {"true", "false", "1", "0"}:
+        raise ImproperlyConfigured(f"{name} must be true, false, 1, or 0.")
+    return value.lower() in {"true", "1"}
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-20qz@aslj!@!v44-822y4y=at@dtqcz$payp-0&4(o16l4nt)c'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+def env_list(name, default=""):
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
-ALLOWED_HOSTS = []
+
+ENVIRONMENT = os.environ.get("DJANGO_ENV", "development")
+if ENVIRONMENT not in {"development", "production"}:
+    raise ImproperlyConfigured("DJANGO_ENV must be development or production.")
+DEBUG = env_bool("DJANGO_DEBUG", ENVIRONMENT == "development")
+if ENVIRONMENT == "production" and DEBUG:
+    raise ImproperlyConfigured("DJANGO_DEBUG must be false in production.")
+PRODUCTION = ENVIRONMENT == "production" or not DEBUG
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+LOCAL_SECRET_KEY_FILE = BASE_DIR / ".local-secret-key"
+if not SECRET_KEY:
+    if PRODUCTION:
+        raise ImproperlyConfigured("Set DJANGO_SECRET_KEY before running in production.")
+    # No settings-import writes: init_local_settings creates a persistent local key.
+    SECRET_KEY = (
+        LOCAL_SECRET_KEY_FILE.read_text(encoding="utf-8").strip()
+        if LOCAL_SECRET_KEY_FILE.exists()
+        else secrets.token_urlsafe(64)
+    )
+if not SECRET_KEY:
+    raise ImproperlyConfigured("The local secret key file is empty.")
+
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]" if DEBUG else "")
+if PRODUCTION and (not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS):
+    raise ImproperlyConfigured("Set DJANGO_ALLOWED_HOSTS to explicit production hostnames.")
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", PRODUCTION)
+SESSION_COOKIE_SECURE = PRODUCTION
+CSRF_COOKIE_SECURE = PRODUCTION
+SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_SECURE_HSTS_SECONDS", "3600" if PRODUCTION else "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
+SECURE_HSTS_PRELOAD = env_bool("DJANGO_SECURE_HSTS_PRELOAD", False)
+# Enable only behind a proxy that strips incoming forwarding headers and sets its own.
+if env_bool("DJANGO_TRUST_PROXY_HTTPS", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -87,9 +127,12 @@ WSGI_APPLICATION = 'YoutubeContent.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.environ.get("DJANGO_DB_PATH", str(BASE_DIR / "db.sqlite3")),
+        'OPTIONS': {'timeout': 20},
     }
 }
+if os.environ.get("DJANGO_TEST_DB_PATH"):
+    DATABASES["default"]["TEST"] = {"NAME": os.environ["DJANGO_TEST_DB_PATH"]}
 
 
 # Password validation
@@ -126,11 +169,15 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
+STATIC_URL = '/static/'
+STATIC_ROOT = Path(os.environ.get("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles")))
+MEDIA_URL = "/media/"
+MEDIA_ROOT = Path(os.environ.get("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media")))
 
-# Phase C production-pipeline limits. Deployments may override these values.
+# Media processing limits and worker recovery timings.
+PIPELINE_LEASE_SECONDS = int(os.environ.get("PIPELINE_LEASE_SECONDS", "30"))
+PIPELINE_HEARTBEAT_SECONDS = int(os.environ.get("PIPELINE_HEARTBEAT_SECONDS", "5"))
+PIPELINE_RETRY_DELAY_SECONDS = int(os.environ.get("PIPELINE_RETRY_DELAY_SECONDS", "5"))
 PRODUCTION_MAX_UPLOAD_BYTES = int(
     os.environ.get("PRODUCTION_MAX_UPLOAD_BYTES", 500 * 1024 * 1024)
 )
@@ -157,16 +204,40 @@ SOURCE_CLIP_DURATION_TOLERANCE_SECONDS = 0.35
 SOURCE_CLIP_MAX_WIDTH = 3840
 SOURCE_CLIP_MAX_HEIGHT = 2160
 SOURCE_CLIP_MAX_FRAME_RATE = 120
+from .local_settings import read_local_ai_settings
+
+_local_ai_settings = read_local_ai_settings(BASE_DIR / "env.py") if not PRODUCTION else {}
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", _local_ai_settings.get("OPENAI_API_KEY", ""))
+OPENAI_RESEARCH_MODEL = os.environ.get(
+    "OPENAI_RESEARCH_MODEL", _local_ai_settings.get("OPENAI_RESEARCH_MODEL", "gpt-6-astra")
+)
+del _local_ai_settings
 SITE_ID = 1
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-MAILERS = {
-    "default": {
-        "BACKEND": "django.core.mail.backends.console.EmailBackend",
-    },
-}
+MAILERS = {"default": {"BACKEND": "django.core.mail.backends.console.EmailBackend"}}
+if PRODUCTION or os.environ.get("DJANGO_SMTP_HOST"):
+    smtp_host = os.environ.get("DJANGO_SMTP_HOST", "")
+    if not smtp_host:
+        raise ImproperlyConfigured("Set DJANGO_SMTP_HOST for production email.")
+    MAILERS["default"] = {
+        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "OPTIONS": {
+            "host": smtp_host,
+            "port": int(os.environ.get("DJANGO_SMTP_PORT", "587")),
+            "username": os.environ.get("DJANGO_SMTP_USERNAME", ""),
+            "password": os.environ.get("DJANGO_SMTP_PASSWORD", ""),
+            "use_tls": env_bool("DJANGO_SMTP_USE_TLS", True),
+            "use_ssl": env_bool("DJANGO_SMTP_USE_SSL", False),
+            "timeout": int(os.environ.get("DJANGO_SMTP_TIMEOUT", "10")),
+        },
+    }
+DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "webmaster@localhost")
+SERVER_EMAIL = os.environ.get("DJANGO_SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+LOGIN_REDIRECT_URL = "/"
+ACCOUNT_LOGOUT_REDIRECT_URL = "/"
 
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",

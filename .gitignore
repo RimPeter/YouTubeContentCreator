@@ -1,6 +1,22 @@
 __pycache__/
 *.py[cod]
 media/
+staticfiles/
+*.sqlite3
+*.sqlite3-*
+.env
+.env.*
+!.env.example
+.local-secret-key
+.venv/
+venv/
+23082026/
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+backups/
 
 notes.txt
 env.py

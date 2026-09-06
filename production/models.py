@@ -8,6 +8,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
+from django.utils import timezone
 
 
 sha256_validator = RegexValidator(
@@ -202,6 +203,10 @@ class PipelineJob(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    available_at = models.DateTimeField(default=timezone.now)
+    lease_token = models.UUIDField(null=True, blank=True, editable=False)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["project", "-created_at"]

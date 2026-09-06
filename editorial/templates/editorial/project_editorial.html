@@ -4,12 +4,13 @@
 <h1>{{ project.title }} · research and reactions</h1>
 <p><a href="{% url 'production:project_clips' project.pk %}">Back to source clips</a></p>
 {% for clip in clips %}
-<section class="card">
+<section class="card" id="research-clip-{{ clip.pk }}">
     <h2>{{ clip.selected_segment.analysis_segment.title }} · approved clip v{{ clip.version }}</h2>
     {% for package in clip.research_packages.all %}
         <p><a href="{% url 'editorial:research_detail' package.pk %}">Research v{{ package.version }}</a> · {{ package.get_status_display }}</p>
     {% empty %}<p class="muted">No research package yet.</p>{% endfor %}
     <h3>Create a new research version</h3>
+    <p><a class="button" href="{% url 'editorial:research_suggestions' clip.pk %}">Suggest research directions</a></p>
     <form method="post" action="{% url 'editorial:create_research' clip.pk %}">
         {% csrf_token %}
         <label>Research question<input name="research_question" maxlength="500" required></label>

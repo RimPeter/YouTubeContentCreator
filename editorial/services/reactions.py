@@ -1,11 +1,13 @@
 from typing import Protocol
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
 from production.models import SourceClip
+from production.services.clips import SourceClipService
 from production.services.dependencies import ArtifactDependencyService
 
 from editorial.models import (
@@ -16,7 +18,7 @@ from editorial.models import (
     compose_reaction_script,
 )
 
-from .access import EditorialServiceError, ensure_editorial_allowed
+from .access import EditorialServiceError, editorial_transaction, ensure_editorial_allowed
 from .fingerprints import reaction_fingerprint, research_fingerprint, source_clip_fingerprint
 
 
@@ -186,20 +188,33 @@ class ReactionService:
             raise EditorialServiceError("Reaction generation requires ready research.")
         if package.source_clip.status != SourceClip.Status.APPROVED:
             raise EditorialServiceError("Reaction generation requires an approved source clip.")
-        if package.input_fingerprint != source_clip_fingerprint(package.source_clip):
+        if (
+            SourceClipService.is_stale(package.source_clip)
+            or package.input_fingerprint != source_clip_fingerprint(package.source_clip)
+        ):
             raise EditorialServiceError("Research inputs are stale; create a new research version.")
 
-    def generate(self, package, user):
-        package = ResearchPackage.objects.select_related(
+    @staticmethod
+    def _package(package_id):
+        return ResearchPackage.objects.select_related(
             "project", "source_clip__processed_asset",
+            "source_clip__source_asset",
             "source_clip__selected_segment__analysis_segment__start_chunk",
             "source_clip__selected_segment__analysis_segment__end_chunk",
             "source_clip__selected_segment__analysis_segment__analysis_run__source_video",
-        ).get(pk=package.pk)
-        self._validate_inputs(package, user)
-        with transaction.atomic():
+        ).get(pk=package_id)
+
+    def generate(self, package, user):
+        """Generate outside transactions and commit only against current inputs.
+
+        This entrypoint owns durable transaction boundaries. Do not wrap it in
+        a caller transaction: invalidation must persist when an error is raised.
+        """
+        with editorial_transaction(package.project_id, user, durable=True):
+            package = self._package(package.pk)
+            self._validate_inputs(package, user)
             version = (
-                ReactionBlock.objects.select_for_update().filter(source_clip=package.source_clip).aggregate(
+                ReactionBlock.objects.filter(source_clip=package.source_clip).aggregate(
                     latest=Max("version")
                 )["latest"]
                 or 0
@@ -216,22 +231,63 @@ class ReactionService:
                 configuration_snapshot={"max_attempts": self.max_attempts},
                 created_by=user,
             )
-        result = None
-        error = None
-        if self.provider:
-            payload = build_provider_payload(package)
-            for _ in range(self.max_attempts):
-                try:
-                    result = validate_provider_result(package, self.provider.generate(payload))
-                    break
-                except Exception as exc:
-                    error = exc
-        used_fallback = result is None
-        if used_fallback:
-            result = validate_provider_result(package, deterministic_fallback(package))
         try:
-            with transaction.atomic():
-                block = ReactionBlock.objects.select_for_update().get(pk=block.pk)
+            raw_result = None
+            error = None
+            if self.provider:
+                payload = build_provider_payload(package)
+                for _ in range(self.max_attempts):
+                    try:
+                        candidate = self.provider.generate(payload)
+                        validate_provider_result(package, candidate)
+                        raw_result = candidate
+                        error = None
+                        break
+                    except Exception as exc:
+                        error = exc
+            used_fallback = raw_result is None
+            if used_fallback:
+                raw_result = deterministic_fallback(package)
+            return self._complete(block, user, raw_result, used_fallback, error)
+        except EditorialServiceError:
+            self._record_failure(block)
+            raise
+        except Exception as exc:
+            self._record_failure(block)
+            raise EditorialServiceError(
+                "Reaction draft could not be saved safely.", "reaction_persistence_failed"
+            ) from exc
+
+    def _complete(self, block, user, raw_result, used_fallback, provider_error):
+        from scraper.services import lock_project
+
+        rejection = None
+        with transaction.atomic(durable=True):
+            project = lock_project(block.project_id)
+            block = ReactionBlock.objects.select_for_update().get(pk=block.pk)
+            package = self._package(block.research_package_id)
+            current_user = get_user_model().objects.filter(pk=user.pk).first()
+            try:
+                ensure_editorial_allowed(project, current_user)
+                self._validate_inputs(package, current_user)
+                if (
+                    block.status != ReactionBlock.Status.GENERATING
+                    or block.input_fingerprint != reaction_fingerprint(package)
+                ):
+                    raise EditorialServiceError(
+                        "Reaction inputs changed during generation; generate a new version.",
+                        "reaction_stale",
+                    )
+            except EditorialServiceError as exc:
+                rejection = exc
+                if block.status == ReactionBlock.Status.GENERATING:
+                    block.status = ReactionBlock.Status.STALE
+                    block.completed_at = timezone.now()
+                    block.save(update_fields=["status", "completed_at", "updated_at"])
+            if rejection is None:
+                # Resolve citations again against the same graph whose freshness
+                # was checked under the project lock, never the provider snapshot.
+                result = validate_provider_result(package, raw_result)
                 for field in SECTION_KEYS - {"claims"}:
                     setattr(block, field, result[field])
                 block.combined_script = compose_reaction_script(
@@ -243,31 +299,41 @@ class ReactionService:
                 block.provider = getattr(self.provider, "provider", "") if self.provider else ""
                 block.provider_model = getattr(self.provider, "model", "") if self.provider else ""
                 block.completed_at = timezone.now()
-                if error:
+                if used_fallback and provider_error:
                     block.configuration_snapshot["fallback_reason"] = getattr(
-                        error, "code", "provider_failed"
+                        provider_error, "code", "provider_failed"
                     )
                 block.full_clean()
                 block.save()
                 ReactionClaim.objects.bulk_create(
                     [ReactionClaim(reaction_block=block, **claim) for claim in result["claims"]]
                 )
-            return block
-        except Exception as exc:
-            ReactionBlock.objects.filter(pk=block.pk).update(
+        if rejection:
+            raise rejection
+        return block
+
+    @staticmethod
+    def _record_failure(block):
+        from scraper.services import lock_project
+
+        with transaction.atomic(durable=True):
+            lock_project(block.project_id)
+            # A late failure must not overwrite an explicit invalidation.
+            ReactionBlock.objects.filter(pk=block.pk, status=ReactionBlock.Status.GENERATING).update(
                 status=ReactionBlock.Status.FAILED,
                 error_code="reaction_persistence_failed",
                 error_message="Reaction draft could not be saved safely.",
                 completed_at=timezone.now(),
                 updated_at=timezone.now(),
             )
-            raise EditorialServiceError(
-                "Reaction draft could not be saved safely.", "reaction_persistence_failed"
-            ) from exc
 
     @staticmethod
-    @transaction.atomic
     def update_draft(block, user, **sections):
+        with editorial_transaction(block.project_id, user):
+            return ReactionService._update_draft(block, user, sections)
+
+    @staticmethod
+    def _update_draft(block, user, sections):
         block = ReactionBlock.objects.select_for_update().select_related("project").get(pk=block.pk)
         ensure_editorial_allowed(block.project, user)
         if block.status != ReactionBlock.Status.DRAFT:
@@ -289,8 +355,12 @@ class ReactionService:
         return block
 
     @staticmethod
-    @transaction.atomic
     def add_claim(block, user, **values):
+        with editorial_transaction(block.project_id, user):
+            return ReactionService._add_claim(block, user, values)
+
+    @staticmethod
+    def _add_claim(block, user, values):
         block = ReactionBlock.objects.select_for_update().select_related("project").get(pk=block.pk)
         ensure_editorial_allowed(block.project, user)
         if block.status != ReactionBlock.Status.DRAFT:
@@ -305,8 +375,13 @@ class ReactionService:
         return claim
 
     @staticmethod
-    @transaction.atomic
     def delete_claim(claim, user):
+        project_id = claim.reaction_block.project_id
+        with editorial_transaction(project_id, user):
+            return ReactionService._delete_claim(claim, user)
+
+    @staticmethod
+    def _delete_claim(claim, user):
         claim = ReactionClaim.objects.select_for_update().select_related(
             "reaction_block__project"
         ).get(pk=claim.pk)
@@ -316,8 +391,18 @@ class ReactionService:
         claim.delete()
 
     @staticmethod
-    @transaction.atomic
     def approve(block, user, *, evidence_reviewed, originality_confirmed):
+        """Commit stale state before reporting rejection; call outside atomic()."""
+        with editorial_transaction(block.project_id, user, durable=True):
+            block, error = ReactionService._approve(
+                block, user, evidence_reviewed, originality_confirmed
+            )
+        if error:
+            raise error
+        return block
+
+    @staticmethod
+    def _approve(block, user, evidence_reviewed, originality_confirmed):
         block = ReactionBlock.objects.select_for_update().select_related(
             "project", "source_clip__processed_asset", "research_package"
         ).get(pk=block.pk)
@@ -326,14 +411,18 @@ class ReactionService:
             raise EditorialServiceError("Only draft reactions can be approved.")
         if not evidence_reviewed or not originality_confirmed:
             raise EditorialServiceError("Both human-review attestations are required.")
-        if block.source_clip.status != SourceClip.Status.APPROVED:
-            raise EditorialServiceError("The source clip is no longer approved.")
-        if block.research_package.status != ResearchPackage.Status.READY:
-            raise EditorialServiceError("The research package is no longer current.")
-        if block.input_fingerprint != reaction_fingerprint(block.research_package):
+        if (
+            block.source_clip.status != SourceClip.Status.APPROVED
+            or SourceClipService.is_stale(block.source_clip)
+            or block.research_package.status != ResearchPackage.Status.READY
+            or block.research_package.input_fingerprint != source_clip_fingerprint(block.source_clip)
+            or block.input_fingerprint != reaction_fingerprint(block.research_package)
+        ):
             block.status = ReactionBlock.Status.STALE
             block.save(update_fields=["status", "updated_at"])
-            raise EditorialServiceError("Reaction inputs changed; generate a new version.")
+            return block, EditorialServiceError(
+                "Reaction inputs changed; generate a new version.", "reaction_stale"
+            )
         claims = list(block.claims.select_related("transcript_chunk", "evidence_source"))
         if not claims:
             raise EditorialServiceError("Add at least one traceable claim before approval.")
@@ -374,4 +463,4 @@ class ReactionService:
             downstream_version=block.version,
             relation_type="reaction_research",
         )
-        return block
+        return block, None

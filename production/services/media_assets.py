@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from production.models import MediaAsset
 from scraper.models import VideoProject
+from scraper.services import lock_project
 
 from .access import ProductionValidationError, ensure_production_allowed
 from .probe import FFprobeClient, MediaProbeError
@@ -99,7 +100,7 @@ class MediaAssetService:
                 raise MediaAssetValidationError(str(exc), exc.code) from exc
 
             with transaction.atomic():
-                locked_project = VideoProject.objects.select_for_update().get(pk=project.pk)
+                locked_project = lock_project(project.pk)
                 ensure_production_allowed(locked_project, user)
                 lineage_id = None
                 version = 1
@@ -182,6 +183,7 @@ class MediaAssetService:
         consent_metadata=None,
         configuration=None,
         previous_asset=None,
+        attempt=None,
     ):
         ensure_production_allowed(project, user)
         local_path = Path(local_path)
@@ -211,8 +213,11 @@ class MediaAssetService:
         committed = False
         try:
             with transaction.atomic():
-                locked_project = VideoProject.objects.select_for_update().get(pk=project.pk)
+                locked_project = lock_project(project.pk)
                 ensure_production_allowed(locked_project, user)
+                if attempt is not None:
+                    from .jobs import PipelineJobService
+                    PipelineJobService._running(attempt)
                 lineage_id = None
                 version = 1
                 if previous_asset is not None:
@@ -275,6 +280,7 @@ class MediaAssetService:
     @staticmethod
     def approve(asset, user):
         with transaction.atomic():
+            lock_project(asset.project_id)
             asset = MediaAsset.objects.select_for_update().select_related("project").get(
                 pk=asset.pk
             )

@@ -2,7 +2,6 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -75,8 +74,12 @@ def project_update(request, pk):
         return redirect("project_detail", pk=project.pk)
     form = VideoProjectForm(request.POST or None, instance=project)
     if request.method == "POST" and form.is_valid():
-        form.save()
-        messages.success(request, "Project updated.")
+        try:
+            ProjectWorkflowService.update(project, form.cleaned_data, request.user)
+        except ProjectWorkflowError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "Project updated.")
         return redirect("project_detail", pk=project.pk)
     return render(request, "scraper/project_form.html", {"form": form, "heading": "Edit project"})
 
@@ -90,7 +93,7 @@ def project_ingest(request, pk):
         messages.error(request, "Enter a YouTube URL or video ID.")
         return redirect("project_detail", pk=project.pk)
     try:
-        result = TranscriptService().ingest(project, form.cleaned_data["youtube_url"])
+        result = TranscriptService().ingest(project, form.cleaned_data["youtube_url"], user=request.user)
     except DuplicateSourceError as exc:
         messages.warning(request, str(exc))
     except (InvalidVideoInputError, ProjectMutationForbiddenError) as exc:
@@ -107,7 +110,7 @@ def project_ingest(request, pk):
 def _run_workflow_action(request, pk, action, success_message):
     project = get_authorized_project(request, pk)
     try:
-        getattr(ProjectWorkflowService, action)(project)
+        getattr(ProjectWorkflowService, action)(project, request.user)
     except ProjectWorkflowError as exc:
         messages.error(request, str(exc))
     else:
@@ -147,13 +150,11 @@ def project_delete(request, pk):
         messages.error(request, "Deletion requires explicit confirmation.")
         return redirect("project_detail", pk=project.pk)
     try:
-        ProjectWorkflowService.ensure_deletable(project)
+        ProjectWorkflowService.delete(project, request.user)
     except ProjectWorkflowError as exc:
         messages.error(request, str(exc))
         return redirect("project_detail", pk=project.pk)
     title = project.title
-    with transaction.atomic():
-        project.delete()
     messages.success(request, f'Project "{title}" deleted.')
     return redirect("project_list")
 
@@ -185,19 +186,10 @@ def delete_transcript(request, pk):
         messages.error(request, "Deletion requires explicit confirmation.")
         return redirect("transcript_detail", pk=source_video.pk)
     try:
-        ProjectWorkflowService.ensure_deletable(source_video.project)
+        ProjectWorkflowService.delete_source(source_video, request.user)
     except ProjectWorkflowError as exc:
         messages.error(request, str(exc))
         return redirect("transcript_detail", pk=source_video.pk)
-    with transaction.atomic():
-        project = source_video.project
-        source_video.delete()
-        if (
-            project.status == VideoProject.Status.TRANSCRIPT_READY
-            and not project.source_videos.exists()
-        ):
-            project.status = VideoProject.Status.DRAFT
-            project.save(update_fields=["status", "updated_at"])
     messages.success(request, "Saved transcript deleted.")
     return redirect("source_video_list")
 
@@ -219,12 +211,17 @@ def fetch_transcript_api(request):
         payload = json.loads(request.body or b"{}")
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({"error": "Invalid JSON."}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"error": "JSON body must be an object."}, status=400)
     project_id = payload.get("project_id")
-    if not project_id:
-        return JsonResponse({"error": "project_id is required."}, status=400)
+    if type(project_id) is not int or not 1 <= project_id <= 9223372036854775807:
+        return JsonResponse({"error": "project_id must be a positive integer."}, status=400)
+    url = payload.get("url")
+    if not isinstance(url, str) or not url.strip() or len(url) > 500:
+        return JsonResponse({"error": "url must be a non-empty string of at most 500 characters."}, status=400)
     project = get_authorized_project(request, project_id)
     try:
-        result = TranscriptService().ingest(project, payload.get("url", ""))
+        result = TranscriptService().ingest(project, url, user=request.user)
     except InvalidVideoInputError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except DuplicateSourceError as exc:

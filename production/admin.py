@@ -1,10 +1,11 @@
 from django.contrib import admin
+from scraper.admin import ReadOnlyArtifactAdmin
 
 from .models import ArtifactDependency, MediaAsset, PipelineJob, SourceClip
 
 
 @admin.register(MediaAsset)
-class MediaAssetAdmin(admin.ModelAdmin):
+class MediaAssetAdmin(ReadOnlyArtifactAdmin):
     list_display = (
         "display_name",
         "project",
@@ -40,7 +41,7 @@ class MediaAssetAdmin(admin.ModelAdmin):
 
 
 @admin.register(PipelineJob)
-class PipelineJobAdmin(admin.ModelAdmin):
+class PipelineJobAdmin(ReadOnlyArtifactAdmin):
     list_display = (
         "job_type",
         "project",
@@ -68,7 +69,7 @@ class PipelineJobAdmin(admin.ModelAdmin):
 
 
 @admin.register(SourceClip)
-class SourceClipAdmin(admin.ModelAdmin):
+class SourceClipAdmin(ReadOnlyArtifactAdmin):
     list_display = (
         "selected_segment",
         "project",
@@ -96,7 +97,7 @@ class SourceClipAdmin(admin.ModelAdmin):
 
 
 @admin.register(ArtifactDependency)
-class ArtifactDependencyAdmin(admin.ModelAdmin):
+class ArtifactDependencyAdmin(ReadOnlyArtifactAdmin):
     list_display = (
         "project",
         "upstream_content_type",

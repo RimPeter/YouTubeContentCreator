@@ -10,7 +10,8 @@ from analysis.models import SegmentSelection
 from scraper.models import VideoProject
 
 from .forms import SourceClipCreationForm, SourceMediaUploadForm
-from .models import MediaAsset, SourceClip
+from .models import MediaAsset, PipelineJob, SourceClip
+from .services.jobs import PipelineJobService
 from .services.access import ProductionServiceError
 from .services.clips import SourceClipService
 from .services.media_assets import MediaAssetService
@@ -22,7 +23,7 @@ def project_queryset_for(user):
 
 
 def selection_queryset_for(user):
-    queryset = SegmentSelection.objects.select_related(
+    queryset = SegmentSelection.objects.active().select_related(
         "project",
         "analysis_segment__analysis_run__source_video",
     )
@@ -51,7 +52,7 @@ def clip_queryset_for(user):
 def project_clips(request, project_pk):
     project = get_object_or_404(project_queryset_for(request.user), pk=project_pk)
     selections = list(
-        project.segment_selections.select_related(
+        project.segment_selections.active().select_related(
             "analysis_segment__analysis_run__source_video"
         ).order_by("order")
     )
@@ -77,6 +78,8 @@ def project_clips(request, project_pk):
                 kind=MediaAsset.Kind.SOURCE_UPLOAD
             ).order_by("display_name", "-version"),
             "upload_form": SourceMediaUploadForm(),
+            "retired_selections": project.segment_selections.filter(retired_at__isnull=False)
+                .select_related("analysis_segment").prefetch_related("source_clips").order_by("-retired_at"),
         },
     )
 
@@ -116,7 +119,7 @@ def create_source_clip(request, selection_pk):
         messages.error(request, "Choose valid source media and padding values.")
         return redirect("production:project_clips", project_pk=selection.project_id)
     try:
-        clip, created = SourceClipService().create_clip(
+        clip, created = SourceClipService().enqueue_clip(
             selection,
             form.cleaned_data["source_asset"],
             request.user,
@@ -128,7 +131,7 @@ def create_source_clip(request, selection_pk):
         return redirect("production:project_clips", project_pk=selection.project_id)
     messages.success(
         request,
-        "Source clip created and validated." if created else "Existing clip reused.",
+        "Clip queued. Processing will continue in the background." if created else "Existing clip or queued job reused.",
     )
     return redirect("production:clip_detail", clip_pk=clip.pk)
 
@@ -145,7 +148,13 @@ def clip_detail(request, clip_pk):
     return render(
         request,
         "production/clip_detail.html",
-        {"clip": clip, "is_stale": is_stale},
+        {"clip": clip, "is_stale": is_stale,
+         "can_retry": clip.pipeline_job.status == PipelineJob.Status.FAILED
+             and clip.pipeline_job.attempt_count < clip.pipeline_job.max_attempts
+             and not SourceClipService.is_stale(clip)
+             and clip.selected_segment.retired_at is None,
+         "can_regenerate": clip.selected_segment.retired_at is None
+             and clip.project.status == VideoProject.Status.APPROVED and not clip.project.is_locked},
     )
 
 
@@ -218,3 +227,41 @@ def stream_source_clip(request, clip_pk):
     response["Cache-Control"] = "private, no-store"
     response["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@login_required
+def project_jobs(request, project_pk):
+    project = get_object_or_404(project_queryset_for(request.user), pk=project_pk)
+    jobs = project.pipeline_jobs.select_related("source_clip").order_by("-created_at")[:100]
+    return render(request, "production/project_jobs.html", {"project": project, "jobs": jobs})
+
+
+def job_queryset_for(user):
+    queryset = PipelineJob.objects.select_related("project")
+    return queryset if user.is_staff or user.is_superuser else queryset.filter(project__owner=user)
+
+
+@login_required
+@require_POST
+def retry_job(request, job_pk):
+    job = get_object_or_404(job_queryset_for(request.user), pk=job_pk)
+    try:
+        PipelineJobService.retry(job, request.user)
+    except ProductionServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Job queued for another attempt.")
+    return redirect("production:project_jobs", project_pk=job.project_id)
+
+
+@login_required
+@require_POST
+def cancel_job(request, job_pk):
+    job = get_object_or_404(job_queryset_for(request.user), pk=job_pk)
+    try:
+        PipelineJobService.cancel(job, request.user)
+    except ProductionServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Job cancelled.")
+    return redirect("production:project_jobs", project_pk=job.project_id)

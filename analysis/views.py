@@ -49,7 +49,7 @@ def segment_queryset_for(user):
 
 
 def selection_queryset_for(user):
-    queryset = SegmentSelection.objects.select_related(
+    queryset = SegmentSelection.objects.active().select_related(
         "project",
         "project__owner",
         "analysis_segment__analysis_run__source_video",
@@ -64,7 +64,7 @@ def project_dashboard(request, project_pk):
     for source in sources:
         for run in source.analysis_runs.all():
             run.is_stale_for_display = AnalysisService.is_stale(run)
-    selections = project.segment_selections.select_related(
+    selections = project.segment_selections.active().select_related(
         "analysis_segment__analysis_run__source_video"
     ).order_by("order")
     return render(
@@ -115,7 +115,7 @@ def run_detail(request, run_pk):
         segments = segments.order_by("order")
     selected = {
         selection.analysis_segment_id: selection
-        for selection in SegmentSelection.objects.filter(
+        for selection in SegmentSelection.objects.active().filter(
             project=run.source_video.project,
             analysis_segment__analysis_run=run,
         )
@@ -192,7 +192,7 @@ def deselect_segment(request, selection_pk):
 @require_POST
 def reorder_selections(request, project_pk):
     project = get_object_or_404(project_queryset_for(request.user), pk=project_pk)
-    current = list(project.segment_selections.order_by("order"))
+    current = list(project.segment_selections.active().order_by("order"))
     try:
         positions = []
         for selection in current:

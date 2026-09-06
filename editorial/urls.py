@@ -8,7 +8,9 @@ from . import views
 urlpatterns = [
     path("projects/<int:project_pk>/", views.project_editorial, name="project_editorial"),
     path("clips/<int:clip_pk>/research/create/", views.create_research, name="create_research"),
+    path("clips/<int:clip_pk>/research/suggestions/", views.research_suggestions, name="research_suggestions"),
     path("research/<int:package_pk>/", views.research_detail, name="research_detail"),
+    path("research/<int:package_pk>/ai/", views.run_ai_research, name="run_ai_research"),
     path("research/<int:package_pk>/evidence/add/", views.add_evidence, name="add_evidence"),
     path("evidence/<int:evidence_pk>/verify/", views.verify_evidence, name="verify_evidence"),
     path("evidence/<int:evidence_pk>/reject/", views.reject_evidence, name="reject_evidence"),

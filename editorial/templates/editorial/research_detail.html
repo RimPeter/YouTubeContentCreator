@@ -6,11 +6,34 @@
 <section class="card"><h2>{{ package.research_question }}</h2><p>{{ package.editorial_focus }}</p>
 <p class="muted">External evidence is never trusted until a user verifies it.</p></section>
 
+{% if package.status == "draft" %}
+<section class="card">
+    <h2>AI research</h2>
+    <p>AI searches the web using your question, focus, and clip transcript, then adds a cited report and evidence leads. Review the findings before marking the research ready.</p>
+    {% if research_job %}
+    <p role="status">AI research: {{ research_job.get_status_display }}. Refresh to see updates.</p>
+    {% if research_job.error_message %}<p>{{ research_job.error_message }}</p>{% endif %}
+    <p><a href="{% url 'production:project_jobs' package.project_id %}">View jobs, retry, or cancel</a></p>
+    {% endif %}
+    {% if not ai_configured %}
+    <p>AI research is not configured. Set OPENAI_API_KEY on the server and worker, then restart both.</p>
+    {% elif research_job.status == "queued" or research_job.status == "running" %}
+    <p>The background worker will save the results here. You can leave this page.</p>
+    {% elif not ai_report %}
+    <form method="post" action="{% url 'editorial:run_ai_research' package.pk %}">{% csrf_token %}<button>Run AI research</button></form>
+    <p class="muted">Uses the configured OpenAI API account; API usage charges apply.</p>
+    {% endif %}
+</section>
+{% endif %}
+{% if ai_report %}
+<section class="card"><h2>AI research report</h2><div style="white-space:pre-wrap;overflow-wrap:anywhere;">{{ ai_report }}</div><p class="muted">AI-generated findings. Citation links identify sources; evidence remains unverified until reviewed.</p></section>
+{% endif %}
 <h2>Evidence</h2>
 {% for evidence in package.evidence_sources.all %}
 <section class="card">
     <h3><a href="{{ evidence.source_url }}" rel="noopener noreferrer">{{ evidence.title }}</a></h3>
     <p>{{ evidence.publisher }} · {{ evidence.get_classification_display }} · {{ evidence.get_verification_status_display }}</p>
+    {% if evidence.source_origin == "provider" %}<p class="muted">Found by AI research</p>{% endif %}
     <p><strong>Finding:</strong> {{ evidence.finding }}</p><p><strong>Relevance:</strong> {{ evidence.relevance }}</p>
     {% if package.status == "draft" %}
     <form class="inline" method="post" action="{% url 'editorial:verify_evidence' evidence.pk %}">{% csrf_token %}<button>Verify</button></form>

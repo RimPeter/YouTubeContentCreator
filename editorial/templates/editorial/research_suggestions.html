@@ -1,0 +1,22 @@
+{% extends "scraper/base.html" %}
+{% block title %}Research suggestions{% endblock %}
+{% block content %}
+<h1>Research suggestions</h1>
+<p>{{ clip.selected_segment.analysis_segment.title }} · clip v{{ clip.version }} · {{ clip.requested_start_seconds }}–{{ clip.requested_end_seconds }} seconds</p>
+<p><a href="{% url 'editorial:project_editorial' clip.project_id %}">Back to research and reactions</a> · <a href="{% url 'production:clip_detail' clip.pk %}">Review clip</a></p>
+<p>Choose a direction and edit its question and focus before creating your research package. These local suggestions use the selected segment's transcript; they have not been fact-checked or researched online.</p>
+<details class="card"><summary>Read the source transcript</summary><p>{{ transcript }}</p></details>
+{% for suggestion in suggestions %}
+<section class="card">
+    <h2>{{ suggestion.label }}</h2>
+    <form method="post" action="{% url 'editorial:create_research' clip.pk %}">
+        {% csrf_token %}
+        <label for="question-{{ forloop.counter }}">Research question</label>
+        <textarea id="question-{{ forloop.counter }}" name="research_question" maxlength="500" rows="3" required>{{ suggestion.research_question }}</textarea>
+        <label for="focus-{{ forloop.counter }}">Editorial focus</label>
+        <textarea id="focus-{{ forloop.counter }}" name="editorial_focus" maxlength="4000" rows="5" required>{{ suggestion.editorial_focus }}</textarea>
+        <button type="submit">Create research package with this direction</button>
+    </form>
+</section>
+{% endfor %}
+{% endblock %}

@@ -1,3 +1,7 @@
+from contextlib import contextmanager
+
+from django.db import transaction
+
 from production.services.access import ensure_production_allowed
 
 
@@ -10,7 +14,20 @@ class EditorialServiceError(Exception):
 
 
 def ensure_editorial_allowed(project, user):
+    if not user or not user.is_active:
+        raise EditorialServiceError("An active account is required for editorial work.", "editorial_not_allowed")
     try:
         ensure_production_allowed(project, user)
     except Exception as exc:
         raise EditorialServiceError(str(exc), "editorial_not_allowed") from exc
+
+
+@contextmanager
+def editorial_transaction(project_id, user, *, durable=False):
+    """Serialize against project lifecycle changes before reading mutation inputs."""
+    from scraper.services import lock_project
+
+    with transaction.atomic(durable=durable):
+        project = lock_project(project_id)
+        ensure_editorial_allowed(project, user)
+        yield project

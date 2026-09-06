@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from production.models import ArtifactDependency, MediaAsset
 from scraper.models import VideoProject
+from scraper.services import lock_project
 
 from .access import ProductionValidationError, ensure_production_allowed
 
@@ -47,8 +48,20 @@ class ArtifactDependencyService:
         if int(upstream_version) < 1 or int(downstream_version) < 1:
             raise ProductionValidationError("Dependency versions must be positive.")
         with transaction.atomic():
-            locked_project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            locked_project = lock_project(project.pk)
             ensure_production_allowed(locked_project, user)
+            # Generic foreign keys cannot enforce existence. Cleanup takes the
+            # same project lock, so recheck after acquiring it rather than
+            # trusting objects loaded before a competing deletion committed.
+            current_artifacts = []
+            for artifact in (upstream, downstream):
+                current = type(artifact)._default_manager.filter(pk=artifact.pk).first()
+                if current is None or _project_id(current) != locked_project.pk:
+                    raise ProductionValidationError(
+                        "A dependency artifact no longer exists in this project."
+                    )
+                current_artifacts.append(current)
+            upstream, downstream = current_artifacts
             dependency, created = ArtifactDependency.objects.get_or_create(
                 project=locked_project,
                 upstream_content_type=ContentType.objects.get_for_model(upstream),
@@ -74,7 +87,7 @@ class ArtifactDependencyService:
         if not re.fullmatch(r"[0-9a-f]{64}", str(current_fingerprint)):
             raise ProductionValidationError("Current fingerprint must be a SHA-256 digest.")
         with transaction.atomic():
-            locked_project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            locked_project = lock_project(project.pk)
             ensure_production_allowed(locked_project, user)
             media_type = ContentType.objects.get_for_model(MediaAsset)
             stale_ids = list(

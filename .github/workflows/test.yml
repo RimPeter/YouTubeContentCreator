@@ -1,0 +1,55 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  django:
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_ENV: development
+      DJANGO_DEBUG: "true"
+      DJANGO_DB_PATH: /tmp/creator-ci.sqlite3
+      DJANGO_TEST_DB_PATH: /tmp/creator-ci-test.sqlite3
+      DJANGO_MEDIA_ROOT: /tmp/creator-ci-media
+      DJANGO_STATIC_ROOT: /tmp/creator-ci-static
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies and media tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Verify migrations and tests
+        run: |
+          python -B manage.py check
+          python -B manage.py makemigrations --check --dry-run
+          python -B manage.py migrate --noinput
+          python -B manage.py check_production_health
+          python -B manage.py test --noinput
+      - name: Check production configuration
+        env:
+          DJANGO_ENV: production
+          DJANGO_DEBUG: "false"
+          DJANGO_SECRET_KEY: ci-only-7wKv2gPb4YjN8xQh6ZrT9fMs3LdB5aEc1HuR0sVz6IkT9pNa2
+          DJANGO_ALLOWED_HOSTS: creator.example.com
+          DJANGO_CSRF_TRUSTED_ORIGINS: https://creator.example.com
+          DJANGO_SMTP_HOST: smtp.example.com
+          DJANGO_DEFAULT_FROM_EMAIL: creator@example.com
+          DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS: "true"
+          DJANGO_SECURE_HSTS_PRELOAD: "true"
+        run: |
+          python -B manage.py check --deploy --fail-level WARNING
+          python -B manage.py collectstatic --noinput

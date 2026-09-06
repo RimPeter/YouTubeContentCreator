@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.db import transaction
 from unittest.mock import patch
 
 from production.models import ArtifactDependency, SourceClip
@@ -12,7 +12,7 @@ from editorial.services.reactions import (
 )
 from editorial.services.research import ResearchService, invalidate_clip_editorial_outputs, validate_public_url
 
-from .helpers import create_approved_clip, create_ready_package
+from .helpers import EditorialTestCase, create_approved_clip, create_ready_package
 
 
 class FakeProvider:
@@ -30,7 +30,7 @@ class FakeProvider:
         return self.result
 
 
-class ResearchServiceTests(TestCase):
+class ResearchServiceTests(EditorialTestCase):
     def setUp(self):
         self.user, self.project, self.source, self.selection, self.clip = create_approved_clip()
         self.package = ResearchService.create_package(
@@ -68,8 +68,35 @@ class ResearchServiceTests(TestCase):
         with self.assertRaises(EditorialServiceError):
             ResearchService.create_package(self.clip, self.user, research_question="Q", editorial_focus="F")
 
+    def test_mark_ready_commits_stale_status_before_raising(self):
+        self.clip.processed_asset.checksum_sha256 = "0" * 64
+        self.clip.processed_asset.save(update_fields=["checksum_sha256"])
+        with self.assertRaises(EditorialServiceError) as caught:
+            ResearchService.mark_ready(self.package, self.user)
+        self.assertEqual(caught.exception.code, "research_stale")
+        self.package.refresh_from_db()
+        self.assertEqual(self.package.status, ResearchPackage.Status.STALE)
 
-class ReactionServiceTests(TestCase):
+    def test_readiness_requires_own_commit_boundary(self):
+        with transaction.atomic():
+            with self.assertRaisesMessage(RuntimeError, "durable atomic block"):
+                ResearchService.mark_ready(self.package, self.user)
+        self.package.refresh_from_db()
+        self.assertEqual(self.package.status, ResearchPackage.Status.DRAFT)
+
+    def test_research_rejects_clip_with_changed_selection(self):
+        self.selection.reviewed_end_seconds = 4
+        self.selection.save(update_fields=["reviewed_end_seconds"])
+        with self.assertRaises(EditorialServiceError):
+            ResearchService.create_package(self.clip, self.user, research_question="Q", editorial_focus="F")
+
+    def test_research_rejects_changed_transcript_despite_approved_clip_status(self):
+        self.source.transcript_chunks.filter(sequence=1).update(text="Revised source statement")
+        with self.assertRaises(EditorialServiceError):
+            ResearchService.create_package(self.clip, self.user, research_question="Q", editorial_focus="F")
+
+
+class ReactionServiceTests(EditorialTestCase):
     def setUp(self):
         (self.user, self.project, self.source, self.selection, self.clip,
          self.package) = create_ready_package("reaction-owner")
@@ -109,6 +136,149 @@ class ReactionServiceTests(TestCase):
         self.assertEqual(len(provider.calls), 2)
         self.assertTrue(block.used_fallback)
         self.assertNotIn("secret", str(block.configuration_snapshot))
+
+    def test_successful_retry_has_no_fallback_reason(self):
+        provider = FakeProvider(deterministic_fallback(self.package))
+        with patch.object(provider, "generate", side_effect=[TimeoutError("first"), provider.result]):
+            block = ReactionService(provider=provider).generate(self.package, self.user)
+        self.assertFalse(block.used_fallback)
+        self.assertNotIn("fallback_reason", block.configuration_snapshot)
+
+    def test_generation_does_not_resurrect_invalidated_block(self):
+        result = deterministic_fallback(self.package)
+        provider = FakeProvider(result)
+
+        def invalidate_and_return(payload):
+            invalidate_clip_editorial_outputs(self.clip)
+            return result
+
+        with patch.object(provider, "generate", side_effect=invalidate_and_return):
+            with self.assertRaises(EditorialServiceError):
+                ReactionService(provider=provider).generate(self.package, self.user)
+        block = ReactionBlock.objects.get()
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+        self.assertFalse(block.claims.exists())
+        self.assertEqual(block.reframe, "")
+
+    def test_generation_rechecks_research_fingerprint_before_persisting(self):
+        result = deterministic_fallback(self.package)
+        provider = FakeProvider(result)
+
+        def change_inputs(payload):
+            ResearchPackage.objects.filter(pk=self.package.pk).update(editorial_focus="Changed during generation")
+            return result
+
+        with patch.object(provider, "generate", side_effect=change_inputs):
+            with self.assertRaises(EditorialServiceError):
+                ReactionService(provider=provider).generate(self.package, self.user)
+        block = ReactionBlock.objects.get()
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+        self.assertFalse(block.claims.exists())
+
+    def test_generation_rechecks_evidence_fields_used_by_provider(self):
+        package = ResearchService.create_package(
+            self.clip, self.user, research_question="Evidence question", editorial_focus="Evidence focus"
+        )
+        evidence = ResearchService.add_evidence(
+            package, self.user, source_url="https://example.com/report", title="Report",
+            publisher="Publisher", retrieved_on="2026-09-01", classification="supports",
+            finding="Finding", relevance="Original relevance",
+        )
+        ResearchService.set_verification(evidence, self.user, verified=True)
+        ResearchService.mark_ready(package, self.user)
+        result = deterministic_fallback(package)
+        provider = FakeProvider(result)
+
+        def change_evidence(payload):
+            EvidenceSource.objects.filter(pk=evidence.pk).update(relevance="Changed after prompt")
+            return result
+
+        with patch.object(provider, "generate", side_effect=change_evidence):
+            with self.assertRaises(EditorialServiceError):
+                ReactionService(provider=provider).generate(package, self.user)
+        block = ReactionBlock.objects.get()
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+        self.assertFalse(block.claims.exists())
+
+    def test_generation_rechecks_project_authorization_before_persisting(self):
+        other = get_user_model().objects.create_user("new-editorial-owner")
+        result = deterministic_fallback(self.package)
+        provider = FakeProvider(result)
+
+        def transfer_project(payload):
+            type(self.project).objects.filter(pk=self.project.pk).update(owner=other)
+            return result
+
+        with patch.object(provider, "generate", side_effect=transfer_project):
+            with self.assertRaises(EditorialServiceError) as caught:
+                ReactionService(provider=provider).generate(self.package, self.user)
+        self.assertEqual(caught.exception.code, "editorial_not_allowed")
+        block = ReactionBlock.objects.get()
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+        self.assertFalse(block.claims.exists())
+
+    def test_generation_reloads_actor_after_staff_permission_revocation(self):
+        staff = get_user_model().objects.create_user("editorial-staff", is_staff=True)
+        result = deterministic_fallback(self.package)
+        provider = FakeProvider(result)
+        for change in ({"is_staff": False}, {"is_active": False}):
+            with self.subTest(change=change):
+                get_user_model().objects.filter(pk=staff.pk).update(is_staff=True, is_active=True)
+
+                def revoke_staff(payload):
+                    get_user_model().objects.filter(pk=staff.pk).update(**change)
+                    return result
+
+                with patch.object(provider, "generate", side_effect=revoke_staff):
+                    with self.assertRaises(EditorialServiceError) as caught:
+                        ReactionService(provider=provider).generate(self.package, staff)
+                self.assertEqual(caught.exception.code, "editorial_not_allowed")
+                self.assertEqual(ReactionBlock.objects.latest("version").status, ReactionBlock.Status.STALE)
+
+    def test_new_ready_research_invalidates_generation_in_flight(self):
+        new_package = ResearchService.create_package(
+            self.clip, self.user, research_question="Revised question", editorial_focus="Revised focus"
+        )
+        result = deterministic_fallback(self.package)
+        provider = FakeProvider(result)
+
+        def make_new_research_ready(payload):
+            ResearchService.mark_ready(new_package, self.user)
+            return result
+
+        with patch.object(provider, "generate", side_effect=make_new_research_ready):
+            with self.assertRaises(EditorialServiceError):
+                ReactionService(provider=provider).generate(self.package, self.user)
+        self.package.refresh_from_db()
+        self.assertEqual(self.package.status, ResearchPackage.Status.SUPERSEDED)
+        block = ReactionBlock.objects.get()
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+        self.assertFalse(block.claims.exists())
+
+    def test_approval_commits_stale_status_before_raising(self):
+        block = ReactionService().generate(self.package, self.user)
+        ResearchPackage.objects.filter(pk=self.package.pk).update(editorial_focus="Changed focus")
+        with self.assertRaises(EditorialServiceError) as caught:
+            ReactionService.approve(block, self.user, evidence_reviewed=True, originality_confirmed=True)
+        self.assertEqual(caught.exception.code, "reaction_stale")
+        block.refresh_from_db()
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+
+    def test_approval_rejects_current_transcript_change(self):
+        block = ReactionService().generate(self.package, self.user)
+        self.source.transcript_chunks.filter(sequence=1).update(text="Changed transcript")
+        with self.assertRaises(EditorialServiceError):
+            ReactionService.approve(block, self.user, evidence_reviewed=True, originality_confirmed=True)
+        block.refresh_from_db()
+        self.assertEqual(block.status, ReactionBlock.Status.STALE)
+
+    def test_generation_and_approval_require_own_commit_boundary(self):
+        block = ReactionService().generate(self.package, self.user)
+        with transaction.atomic():
+            with self.assertRaisesMessage(RuntimeError, "durable atomic block"):
+                ReactionService().generate(self.package, self.user)
+            with self.assertRaisesMessage(RuntimeError, "durable atomic block"):
+                ReactionService.approve(block, self.user, evidence_reviewed=True, originality_confirmed=True)
 
     def test_valid_structured_provider_result_is_persisted(self):
         result = deterministic_fallback(self.package)

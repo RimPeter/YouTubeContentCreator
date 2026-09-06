@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from urllib.request import urlopen
 import json
 import re
+import math
 from urllib.parse import parse_qs, urlparse
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.db.models import F
 from django.utils import timezone
 from youtube_transcript_api import YouTubeTranscriptApi
 
@@ -44,6 +46,20 @@ class ProjectWorkflowError(Exception):
     pass
 
 
+def lock_project(project_id):
+    """Serialize project writes, including on SQLite, before reading current state.
+
+    Call as the first database operation in an atomic block. A harmless UPDATE
+    obtains a database write lock on SQLite and a row lock on PostgreSQL; a
+    SELECT FOR UPDATE by itself would not protect SQLite workflows.
+    """
+    if not connection.in_atomic_block:
+        raise RuntimeError("lock_project requires transaction.atomic().")
+    if not VideoProject.objects.filter(pk=project_id).update(updated_at=F("updated_at")):
+        raise VideoProject.DoesNotExist("The project no longer exists.")
+    return VideoProject.objects.get(pk=project_id)
+
+
 @dataclass(frozen=True)
 class TranscriptIngestionResult:
     source_video: SourceVideo
@@ -70,6 +86,8 @@ class TranscriptService:
 
     @classmethod
     def normalize_video_id(cls, value):
+        if not isinstance(value, str):
+            raise InvalidVideoInputError("Enter a valid YouTube URL or video ID.")
         candidate = (value or "").strip()
         if VIDEO_ID_PATTERN.fullmatch(candidate):
             return candidate
@@ -117,7 +135,7 @@ class TranscriptService:
                 raise TranscriptRemoteError(
                     f"Transcript entry {position} contains invalid timing."
                 ) from exc
-            if start < 0 or duration < 0 or not isinstance(text, str):
+            if not math.isfinite(start) or not math.isfinite(duration) or start < 0 or duration < 0 or not isinstance(text, str):
                 raise TranscriptRemoteError(
                     f"Transcript entry {position} contains invalid data."
                 )
@@ -133,7 +151,12 @@ class TranscriptService:
             raise TranscriptUnavailableError("No transcript is available for this video.")
         return entries
 
-    def ingest(self, project, submitted_url_or_id):
+    def ingest(self, project, submitted_url_or_id, user=None):
+        try:
+            project = VideoProject.objects.get(pk=project.pk)
+            ProjectWorkflowService.ensure_user_access(project, user)
+        except (VideoProject.DoesNotExist, ProjectWorkflowError) as exc:
+            raise ProjectMutationForbiddenError(str(exc)) from exc
         if not project.content_is_mutable:
             raise ProjectMutationForbiddenError(
                 "Approved, locked, or archived projects cannot accept transcript changes."
@@ -168,6 +191,12 @@ class TranscriptService:
 
         try:
             with transaction.atomic():
+                try:
+                    project = lock_project(project.pk)
+                    ProjectWorkflowService.ensure_user_access(project, user)
+                    ProjectWorkflowService.ensure_content_mutable(project)
+                except (VideoProject.DoesNotExist, ProjectWorkflowError) as exc:
+                    raise ProjectMutationForbiddenError(str(exc)) from exc
                 source_video = SourceVideo.objects.create(
                     project=project,
                     youtube_url=source_url,
@@ -211,6 +240,71 @@ class TranscriptService:
 
 class ProjectWorkflowService:
     @staticmethod
+    def ensure_user_access(project, user):
+        # None is reserved for trusted management-command callers.
+        if user is not None and (not user.is_authenticated or (
+            project.owner_id != user.pk and not user.is_staff and not user.is_superuser
+        )):
+            raise ProjectWorkflowError("You cannot modify this project.")
+
+    @classmethod
+    def _current(cls, project, user=None):
+        try:
+            current = lock_project(getattr(project, "pk", project))
+        except VideoProject.DoesNotExist as exc:
+            raise ProjectWorkflowError("The project no longer exists.") from exc
+        cls.ensure_user_access(current, user)
+        return current
+
+    @classmethod
+    def update(cls, project, changes, user=None):
+        with transaction.atomic():
+            project = cls._current(project, user)
+            cls.ensure_content_mutable(project)
+            fields = {"title", "description", "expected_duration"}
+            if set(changes) - fields:
+                raise ProjectWorkflowError("Only project details may be edited.")
+            for field, value in changes.items():
+                setattr(project, field, value)
+            project.full_clean()
+            project.save(update_fields=[*changes, "updated_at"])
+            return project
+
+    @classmethod
+    def delete(cls, project, user=None):
+        with transaction.atomic():
+            project = cls._current(project, user)
+            cls.ensure_deletable(project)
+            project.delete()
+
+    @classmethod
+    def discard_empty_draft(cls, project):
+        """Clean up a failed command's draft only if nobody has started using it."""
+        with transaction.atomic():
+            try:
+                project = lock_project(project.pk)
+            except VideoProject.DoesNotExist:
+                return False
+            if project.status != VideoProject.Status.DRAFT or project.is_locked or project.source_videos.exists():
+                return False
+            project.delete()
+            return True
+
+    @classmethod
+    def delete_source(cls, source, user=None):
+        with transaction.atomic():
+            project = cls._current(source.project_id, user)
+            cls.ensure_deletable(project)
+            try:
+                source = SourceVideo.objects.get(pk=source.pk, project=project)
+            except SourceVideo.DoesNotExist as exc:
+                raise ProjectWorkflowError("The source no longer exists.") from exc
+            source.delete()
+            if project.status == VideoProject.Status.TRANSCRIPT_READY and not project.source_videos.exists():
+                project.status = VideoProject.Status.DRAFT
+                project.save(update_fields=["status", "updated_at"])
+
+    @staticmethod
     def ensure_content_mutable(project):
         if not project.content_is_mutable:
             raise ProjectWorkflowError(
@@ -218,9 +312,9 @@ class ProjectWorkflowService:
             )
 
     @classmethod
-    def approve(cls, project):
+    def approve(cls, project, user=None):
         with transaction.atomic():
-            project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            project = cls._current(project, user)
             if project.is_locked or project.status != VideoProject.Status.TRANSCRIPT_READY:
                 raise ProjectWorkflowError("Only an unlocked transcript-ready project can be approved.")
             if not project.source_videos.exists():
@@ -235,9 +329,9 @@ class ProjectWorkflowService:
             return project
 
     @classmethod
-    def lock(cls, project):
+    def lock(cls, project, user=None):
         with transaction.atomic():
-            project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            project = cls._current(project, user)
             if project.status != VideoProject.Status.APPROVED or project.is_locked:
                 raise ProjectWorkflowError("Only an unlocked approved project can be locked.")
             project.is_locked = True
@@ -246,9 +340,9 @@ class ProjectWorkflowService:
             return project
 
     @classmethod
-    def unlock(cls, project):
+    def unlock(cls, project, user=None):
         with transaction.atomic():
-            project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            project = cls._current(project, user)
             if project.status != VideoProject.Status.APPROVED or not project.is_locked:
                 raise ProjectWorkflowError("Only a locked approved project can be unlocked.")
             project.is_locked = False
@@ -257,9 +351,9 @@ class ProjectWorkflowService:
             return project
 
     @classmethod
-    def archive(cls, project):
+    def archive(cls, project, user=None):
         with transaction.atomic():
-            project = VideoProject.objects.select_for_update().get(pk=project.pk)
+            project = cls._current(project, user)
             if project.status == VideoProject.Status.ARCHIVED:
                 raise ProjectWorkflowError("The project is already archived.")
             if project.is_locked:

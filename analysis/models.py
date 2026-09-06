@@ -130,7 +130,14 @@ class AnalysisSegment(models.Model):
             raise ValidationError(errors)
 
 
+class SegmentSelectionQuerySet(models.QuerySet):
+    def active(self):
+        return self.filter(retired_at__isnull=True)
+
+
 class SegmentSelection(models.Model):
+    # The default manager deliberately includes history. Worklists opt into active().
+    objects = SegmentSelectionQuerySet.as_manager()
     project = models.ForeignKey(
         "scraper.VideoProject",
         on_delete=models.CASCADE,
@@ -151,6 +158,15 @@ class SegmentSelection(models.Model):
         null=True,
         related_name="segment_selections_created",
     )
+    retired_at = models.DateTimeField(null=True, blank=True, editable=False)
+    retired_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name="segment_selections_retired",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -159,11 +175,13 @@ class SegmentSelection(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["project", "analysis_segment"],
-                name="selection_project_segment_uniq",
+                condition=models.Q(retired_at__isnull=True),
+                name="selection_active_segment_uniq",
             ),
             models.UniqueConstraint(
                 fields=["project", "order"],
-                name="selection_project_order_uniq",
+                condition=models.Q(retired_at__isnull=True),
+                name="selection_active_order_uniq",
             ),
             models.CheckConstraint(
                 condition=models.Q(order__gte=1),

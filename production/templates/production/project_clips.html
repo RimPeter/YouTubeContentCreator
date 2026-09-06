@@ -2,6 +2,7 @@
 {% block title %}Source clips · {{ project.title }}{% endblock %}
 {% block content %}
 <h1>Source clips</h1>
+<p><a class="button" href="{% url 'production:project_jobs' project.pk %}">Processing jobs</a></p>
 <p><a href="{% url 'project_detail' project.pk %}">{{ project.title }}</a> · <a href="{% url 'analysis:project_dashboard' project.pk %}">Transcript analysis</a></p>
 <p>Status: {{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</p>
 
@@ -45,7 +46,7 @@
         <form method="post" action="{% url 'production:create_source_clip' row.selection.pk %}">
             {% csrf_token %}
             {{ row.form.as_p }}
-            <button type="submit">Create validated clip</button>
+            <button type="submit">Queue clip</button>
         </form>
         {% endif %}
         <h4>Clip versions</h4>
@@ -57,4 +58,16 @@
     </article>
     {% empty %}<p>Select at least one transcript-analysis segment first.</p>{% endfor %}
 </section>
+{% if retired_selections %}
+<section class="card">
+    <h2>Retired selections and clip history</h2>
+    <p class="muted">These selections are preserved for reference. Select a segment again in transcript analysis to create new work.</p>
+    {% for selection in retired_selections %}
+    <h3>{{ selection.analysis_segment.title }}</h3>
+    <ul>{% for clip in selection.source_clips.all %}
+        <li><a href="{% url 'production:clip_detail' clip.pk %}">Clip version {{ clip.version }}</a> · {{ clip.get_status_display }}</li>
+    {% empty %}<li>No clips were created.</li>{% endfor %}</ul>
+    {% endfor %}
+</section>
+{% endif %}
 {% endblock %}
