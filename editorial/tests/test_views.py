@@ -73,7 +73,7 @@ class EditorialViewTests(EditorialTestCase):
         )
         ResearchService.mark_ready(package, self.user)
         response = self.client.post(
-            reverse("editorial:generate_reaction", args=[package.pk]), follow=True,
+            reverse("editorial:generate_reaction", args=[package.pk]), {"mode": "basic"}, follow=True,
         )
         reaction = package.reaction_blocks.get()
         self.assertContains(response, escape(reaction.combined_script))

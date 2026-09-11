@@ -103,6 +103,30 @@ class AIResearchWorkflowTests(EditorialTestCase):
         job.refresh_from_db()
         self.assertEqual(job.status, 'succeeded')
 
+    def test_activity_tracks_worker_and_completion_without_exposing_other_projects(self):
+        url = reverse('editorial:research_detail', args=[self.package.pk]) + '?activity=1'
+        job = AIResearchService.enqueue(self.package, self.user)
+        response = self.client.get(url)
+        self.assertContains(response, 'Waiting for the background worker')
+        self.assertEqual(response['Cache-Control'], 'no-store')
+        self.assertNotContains(response, '<form')
+        provider = self.provider()
+
+        def while_researching(*args):
+            job.refresh_from_db()
+            self.assertEqual(job.progress, 10)
+            response = self.client.get(url)
+            self.assertContains(response, 'Waiting for the research provider')
+            self.assertContains(response, 'Last worker heartbeat')
+            return parse_response(api_response())
+
+        provider.research.side_effect = while_researching
+        AIResearchService.process_job(PipelineJobService.start(job), provider)
+        self.assertContains(self.client.get(url), 'Research complete')
+        other = get_user_model().objects.create_user('activity-other')
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
     def test_cancelled_or_changed_inputs_discard_late_output(self):
         for change in ('cancel', 'ready', 'question', 'actor'):
             with self.subTest(change=change):

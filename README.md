@@ -2,7 +2,7 @@
 
 A Django workspace for reviewing YouTube transcripts, selecting segments, producing clips from authorized source media, collecting evidence, and approving reaction scripts. Project owners see their own work; staff can review all projects.
 
-The dashboard shows current reviews, active jobs, failed job history, and the next available step. Analysis and reaction generation currently use built-in fallback suggestions through the UI. AI web research is available when an OpenAI API key is configured. Final video assembly and publishing are not connected in the application.
+The dashboard shows current reviews, active jobs, failed job history, and the next available step. Analysis uses built-in suggestions. AI web research and reaction-script generation are available when an OpenAI API key is configured; a basic local reaction draft is also available. Final video assembly and publishing are not connected in the application.
 
 ## Local setup
 
@@ -37,13 +37,13 @@ In a second terminal, run the worker with the same virtual environment and confi
 3. Upload source video with the required rights confirmation, then request a clip for each selection. The request queues durable work. Follow **Jobs** for progress and review the clip when processing finishes.
 4. Approve a validated clip, create research, add and verify evidence, and mark the research ready.
    Use **Suggest research directions** beside the research form to get three editable question/focus pairs based on the selected segment's transcript. Suggestions use local topic rules and transcript excerpts, with general claim-checking prompts for other topics. They do not search the web or verify claims. Reviewing suggestions does not save a package; choose **Create research package with this direction** when ready.
-5. Generate a reaction draft, edit its sections and claims, review evidence and originality, then approve it.
+5. On ready research, choose **Generate AI reaction draft** and follow Script activity. Open **Review generated script** when it completes, edit its sections and claims, review evidence and originality, then approve it. **Start with a basic draft instead** creates a local template without API usage.
 
 Changing a selection or source invalidates affected clips and editorial work. **Stale** means an input changed and the result must be regenerated before approval. Deselection retires the selection, preserving its clip history. Reselecting creates a new active selection. Historical versions remain accessible for review; approved history cannot be edited in admin. To switch to a new analysis run for a source, retire its previous selections first. Transcript approval protects the source text; create another project when a different transcript is required.
 
 ## Worker operation and recovery
 
-The database-backed worker handles `clip_trim` and `ai_research` jobs. Short analysis and editorial fallback generation still run synchronously. Web and worker processes must share the same database, media directory, and configuration. Start with one worker for a local SQLite installation; SQLite serializes writes and is intended here for a single-host deployment. Do not put the database on a network filesystem.
+The database-backed worker handles `clip_trim`, `ai_research`, and `ai_reaction` jobs. Short analysis and basic editorial draft generation still run synchronously. Web and worker processes must share the same database, media directory, and configuration. Restart the worker after code changes; it does not auto-reload. Start with one worker for a local SQLite installation; SQLite serializes writes and is intended here for a single-host deployment. Do not put the database on a network filesystem.
 
 ```text
 python -B manage.py run_pipeline_worker --poll-interval 2
@@ -63,11 +63,17 @@ On a failure, open the project's **Jobs** page, inspect the error, fix the cause
 
 Configure `OPENAI_API_KEY` in the environments used by both Django and the worker, then restart both. Keep the key private; do not enter it into a research form or commit it. `.env` files are not loaded automatically. `OPENAI_RESEARCH_MODEL` defaults to `gpt-6-astra` and can be set to another Responses API model supporting web search that your API account can access.
 
-For local development, the ignored root `env.py` file can alternatively contain `OPENAI_API_KEY=...` and `OPENAI_RESEARCH_MODEL=...` entries (quoted values also work). Only those two settings are read as data; Python code in that file is never executed. Explicit environment variables take precedence. Production ignores this file. Restart the server and worker after changing it.
+For local development, the ignored root `env.py` file can alternatively contain `OPENAI_API_KEY=...`, `OPENAI_RESEARCH_MODEL=...`, and `OPENAI_REACTION_MODEL=...` entries (quoted values also work). Only those three settings are read as data; Python code in that file is never executed. Explicit environment variables take precedence. Production ignores this file. Restart the server and worker after changing it.
 
 On a draft research package, click **Run AI research**. The worker sends the question, editorial focus, and selected segment transcript to OpenAI's [Responses API with web search](https://developers.openai.com/api/docs/guides/tools-web-search). It requests a report with primary sources, counterevidence, and limitations. API usage charges apply. No video file, local file path, or API key is stored in the job payload. Each provider request has a 180-second network timeout and a 6,000 output-token cap; these are not a total cost limit. An interrupted job may repeat the provider request during recovery (at most two attempts per job).
 
-Refresh the package to read the report with clickable citations and its evidence leads. AI leads are marked **Unverified** and **Context** until reviewed; AI completion does not mark the package ready or approve a reaction. Duplicate requests reuse queued, running, or successful work for the same inputs. Failed jobs can be retried from **Jobs**. Create a new research version for a fresh investigation after a successful run. Missing credentials, incomplete or uncited responses, and provider errors produce visible errors rather than fabricated fallback research. Automated tests use mocked provider responses; live API access must be checked with your configured account.
+Research activity updates automatically every three seconds. Open the saved report when complete to read its clickable citations and evidence leads. AI leads are marked **Unverified** and **Context** until reviewed; AI completion does not mark the package ready or approve a reaction. Duplicate requests reuse queued, running, or successful work for the same inputs. Failed jobs can be retried from **Jobs**. Create a new research version for a fresh investigation after a successful run. Missing credentials, incomplete or uncited responses, and provider errors produce visible errors rather than fabricated fallback research. Automated tests use mocked provider responses; live API access must be checked with your configured account.
+
+### AI reaction scripts
+
+`OPENAI_REACTION_MODEL` defaults to the configured research model; optionally set it to a model your account can access that supports Responses API structured outputs. The worker uses [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) to request script sections and traceable claims from the selected transcript and human-verified evidence. It makes no web searches and sends no media files. Each attempt has a 180-second network timeout, a 6,000 output-token cap, and one provider request. Research payloads larger than 100,000 serialized characters are rejected before enqueueing.
+
+Script activity reports queue, generation, validation, completion, and failure stages. Duplicate requests reuse the same job and successful draft for unchanged inputs/model; edit that draft or create new research for a fresh version. Failed jobs can be retried from **Jobs**, up to two attempts total. Cancelling, losing the worker lease, or changing inputs prevents late output from becoming a usable draft. API failures do not silently substitute a basic draft. Validated drafts remain unapproved until human review; citation validation checks references, not whether evidence supports every sentence.
 
 ### Deployment settings
 

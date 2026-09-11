@@ -1,0 +1,30 @@
+<div id="reaction-activity" data-status="{{ reaction_job.status|default:'idle' }}">
+    <h3 id="reaction-activity-label">Script activity</h3>
+    <div role="log" aria-labelledby="reaction-activity-label" aria-live="polite" aria-atomic="true" tabindex="0" style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:.5rem;padding:1rem;max-height:16rem;overflow:auto;font-family:monospace;">
+        {% if reaction_job %}
+        <div>{{ reaction_job.created_at|date:"H:i:s" }} — Script request queued.</div>
+        {% if reaction_job.status == "queued" %}
+        <div>Waiting for the background worker.</div>
+        {% else %}
+        {% if reaction_job.started_at %}<div>{{ reaction_job.started_at|date:"H:i:s" }} — Worker started attempt {{ reaction_job.attempt_count }}.</div>{% endif %}
+        {% if reaction_job.progress >= 10 %}<div>Research checked. Requesting an original script using the transcript and verified evidence.</div>{% endif %}
+        {% if reaction_job.progress >= 80 %}<div>Script received. Validating sections, citations, and current research before saving.</div>{% endif %}
+        {% if reaction_job.status == "running" %}
+        <div>{% if reaction_job.progress < 10 %}Checking research inputs.{% elif reaction_job.progress < 80 %}Waiting for the AI provider. This can take a few minutes.{% else %}Saving the draft and traceable claims.{% endif %}</div>
+        <div>Last worker heartbeat: {{ reaction_job.heartbeat_at|date:"H:i:s" }}.</div>
+        {% elif reaction_job.status == "succeeded" %}<div>{{ reaction_job.completed_at|date:"H:i:s" }} — Script saved for human review.</div>
+        {% elif reaction_job.status == "failed" %}<div>Script generation failed: {{ reaction_job.error_message }}</div>
+        {% elif reaction_job.status == "cancelled" %}<div>Script generation cancelled.</div>{% endif %}
+        {% endif %}
+        {% else %}<div>Ready to generate a script from reviewed research.</div>{% endif %}
+    </div>
+    {% if generated_reaction %}<p><a href="{% url 'editorial:reaction_detail' generated_reaction.pk %}">Review generated script</a></p>{% endif %}
+    {% if reaction_job %}<p><a href="{% url 'production:project_jobs' package.project_id %}">View jobs, retry, or cancel</a></p>{% endif %}
+    {% if package.status == "ready" %}
+    {% if reaction_job.status != "queued" and reaction_job.status != "running" and reaction_job.status != "succeeded" %}
+    {% if ai_configured %}<form method="post" action="{% url 'editorial:generate_reaction' package.pk %}">{% csrf_token %}<button>Generate AI reaction draft</button></form>
+    <p class="muted">Uses your configured API account. API usage charges apply.</p>
+    {% else %}<p>AI drafting needs OPENAI_API_KEY configured on the server and worker.</p>{% endif %}
+    {% endif %}
+    {% endif %}
+</div>

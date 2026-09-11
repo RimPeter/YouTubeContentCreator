@@ -15,6 +15,7 @@ from .services.reactions import ReactionService
 from .services.research import ResearchService
 from .services.research_suggestions import suggestions_for_clip
 from .services.ai_research import AIResearchService, render_report
+from .services.ai_reactions import AIReactionService
 
 
 def _owned(queryset, user):
@@ -100,12 +101,25 @@ def research_detail(request, package_pk):
         project_id=package.project_id, job_type="ai_research", input_snapshot__package_id=package.pk,
     ).order_by("-created_at").first()
     report = package.configuration_snapshot.get("ai_research_report", {})
-    return render(request, "editorial/research_detail.html", {
+    reaction_job = PipelineJob.objects.filter(
+        project_id=package.project_id, job_type="ai_reaction", input_snapshot__package_id=package.pk,
+    ).order_by("-created_at").first()
+    generated_reaction = package.reaction_blocks.filter(
+        configuration_snapshot__pipeline_job_id=reaction_job.pk,
+        status__in=["draft", "approved", "superseded"],
+    ).order_by("-version").first() if reaction_job else None
+    template = "editorial/_research_activity.html" if request.GET.get("activity") == "1" else "editorial/research_detail.html"
+    if request.GET.get("activity") == "reaction":
+        template = "editorial/_reaction_activity.html"
+    response = render(request, template, {
         "package": package, "evidence_form": EvidenceSourceForm(),
         "reactions": package.reaction_blocks.all(),
         "research_job": job, "ai_configured": bool(settings.OPENAI_API_KEY),
+        "reaction_job": reaction_job, "generated_reaction": generated_reaction,
         "ai_report": render_report(report) if report else "",
     })
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @login_required
@@ -178,6 +192,9 @@ def mark_research_ready(request, package_pk):
 @require_POST
 def generate_reaction(request, package_pk):
     package = get_object_or_404(package_qs(request.user), pk=package_pk)
+    if request.POST.get("mode") != "basic":
+        return _result(request, lambda: AIReactionService.enqueue(package, request.user),
+                       "AI reaction requested. Follow its progress below.", "editorial:research_detail", package.pk)
     try:
         block = ReactionService().generate(package, request.user)
     except EditorialServiceError as exc:

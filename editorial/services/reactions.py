@@ -9,6 +9,7 @@ from django.utils import timezone
 from production.models import SourceClip
 from production.services.clips import SourceClipService
 from production.services.dependencies import ArtifactDependencyService
+from production.services.jobs import PipelineJobService
 
 from editorial.models import (
     EvidenceSource,
@@ -101,7 +102,7 @@ def validate_provider_result(package, result):
         raise EditorialServiceError("Provider returned an invalid reaction type.", "provider_schema_invalid")
     normalized["reaction_type"] = reaction_type
     claims = result["claims"]
-    if not isinstance(claims, list) or not claims:
+    if not isinstance(claims, list) or not 1 <= len(claims) <= 50:
         raise EditorialServiceError("Provider response requires traceable claims.", "provider_schema_invalid")
     segment = package.source_clip.selected_segment.analysis_segment
     chunks = {
@@ -124,6 +125,9 @@ def validate_provider_result(package, result):
         claim_type = claim["claim_type"]
         if claim_type not in ReactionClaim.ClaimType.values:
             raise EditorialServiceError("A provider claim has an invalid type.", "provider_schema_invalid")
+        for citation_key in ("transcript_sequence", "evidence_source_id"):
+            if claim[citation_key] is not None and type(claim[citation_key]) is not int:
+                raise EditorialServiceError("Citation IDs must be integers or null.", "citation_invalid")
         transcript = chunks.get(claim["transcript_sequence"])
         source = evidence.get(claim["evidence_source_id"])
         if claim["transcript_sequence"] is not None and transcript is None:
@@ -204,7 +208,7 @@ class ReactionService:
             "source_clip__selected_segment__analysis_segment__analysis_run__source_video",
         ).get(pk=package_id)
 
-    def generate(self, package, user):
+    def generate(self, package, user, *, job=None):
         """Generate outside transactions and commit only against current inputs.
 
         This entrypoint owns durable transaction boundaries. Do not wrap it in
@@ -213,6 +217,16 @@ class ReactionService:
         with editorial_transaction(package.project_id, user, durable=True):
             package = self._package(package.pk)
             self._validate_inputs(package, user)
+            if job:
+                PipelineJobService._running(job)
+                if (package.project_id != job.project_id
+                        or reaction_fingerprint(package) != job.input_snapshot["reaction_fingerprint"]):
+                    raise EditorialServiceError("Reaction inputs changed. Request a new draft.")
+                ReactionBlock.objects.filter(
+                    project_id=job.project_id, configuration_snapshot__pipeline_job_id=job.pk,
+                    status=ReactionBlock.Status.GENERATING,
+                ).update(status=ReactionBlock.Status.FAILED, completed_at=timezone.now(),
+                         error_code="worker_interrupted", error_message="Previous worker attempt was interrupted.")
             version = (
                 ReactionBlock.objects.filter(source_clip=package.source_clip).aggregate(
                     latest=Max("version")
@@ -227,11 +241,15 @@ class ReactionService:
                 input_fingerprint=reaction_fingerprint(package),
                 reaction_type=ReactionBlock.ReactionType.CONTEXT,
                 algorithm_version=REACTION_ALGORITHM_VERSION,
-                prompt_version=REACTION_PROMPT_VERSION,
-                configuration_snapshot={"max_attempts": self.max_attempts},
+                prompt_version=job.configuration_snapshot["prompt_version"] if job else REACTION_PROMPT_VERSION,
+                configuration_snapshot={"max_attempts": self.max_attempts,
+                                        **({"pipeline_job_id": job.pk,
+                                            "generation": job.configuration_snapshot} if job else {})},
                 created_by=user,
             )
         try:
+            if job:
+                PipelineJobService.update_progress(job, 10)
             raw_result = None
             error = None
             if self.provider:
@@ -246,9 +264,15 @@ class ReactionService:
                     except Exception as exc:
                         error = exc
             used_fallback = raw_result is None
+            if used_fallback and job:
+                if isinstance(error, EditorialServiceError):
+                    raise error
+                raise EditorialServiceError("AI reaction generation failed. Retry from Jobs.")
             if used_fallback:
                 raw_result = deterministic_fallback(package)
-            return self._complete(block, user, raw_result, used_fallback, error)
+            if job:
+                PipelineJobService.update_progress(job, 80)
+            return self._complete(block, user, raw_result, used_fallback, error, job=job)
         except EditorialServiceError:
             self._record_failure(block)
             raise
@@ -258,12 +282,14 @@ class ReactionService:
                 "Reaction draft could not be saved safely.", "reaction_persistence_failed"
             ) from exc
 
-    def _complete(self, block, user, raw_result, used_fallback, provider_error):
+    def _complete(self, block, user, raw_result, used_fallback, provider_error, *, job=None):
         from scraper.services import lock_project
 
         rejection = None
         with transaction.atomic(durable=True):
             project = lock_project(block.project_id)
+            if job:
+                PipelineJobService._running(job)
             block = ReactionBlock.objects.select_for_update().get(pk=block.pk)
             package = self._package(block.research_package_id)
             current_user = get_user_model().objects.filter(pk=user.pk).first()
@@ -308,6 +334,8 @@ class ReactionService:
                 ReactionClaim.objects.bulk_create(
                     [ReactionClaim(reaction_block=block, **claim) for claim in result["claims"]]
                 )
+                if job:
+                    PipelineJobService.succeed(job)
         if rejection:
             raise rejection
         return block

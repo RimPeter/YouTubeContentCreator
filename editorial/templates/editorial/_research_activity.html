@@ -1,0 +1,27 @@
+<div id="research-activity" data-status="{{ research_job.status|default:'idle' }}">
+    <h3 id="research-activity-label">Research activity</h3>
+    <div role="log" aria-labelledby="research-activity-label" aria-live="polite" aria-atomic="true" tabindex="0" style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:.5rem;padding:1rem;max-height:16rem;overflow:auto;font-family:monospace;white-space:normal;">
+        {% if research_job %}
+        <div>{{ research_job.created_at|date:"H:i:s" }} — Research request queued.</div>
+        {% if research_job.status == "queued" %}
+        <div>Waiting for the background worker. This will update automatically when processing starts.</div>
+        {% else %}
+        {% if research_job.started_at %}<div>{{ research_job.started_at|date:"H:i:s" }} — Worker started attempt {{ research_job.attempt_count }}.</div>{% endif %}
+        {% if research_job.progress >= 10 %}<div>Research inputs checked. Request sent for web research and a cited report.</div>{% endif %}
+        {% if research_job.progress >= 80 %}<div>Cited report received. Checking inputs again and saving evidence leads.</div>{% endif %}
+        {% if research_job.status == "running" %}
+        <div>{% if research_job.progress < 10 %}Checking the approved clip and research inputs.{% elif research_job.progress < 80 %}Waiting for the research provider to return its findings. This can take a few minutes.{% else %}Saving the report and evidence leads.{% endif %}</div>
+        {% if research_job.heartbeat_at %}<div>Last worker heartbeat: {{ research_job.heartbeat_at|date:"H:i:s" }}.</div>{% endif %}
+        {% elif research_job.status == "succeeded" %}
+        <div>{{ research_job.completed_at|date:"H:i:s" }} — Research complete. Report and evidence leads saved.</div>
+        {% elif research_job.status == "failed" %}
+        <div>Research failed: {{ research_job.error_message }}</div>
+        {% elif research_job.status == "cancelled" %}
+        <div>Research cancelled.</div>
+        {% endif %}
+        {% endif %}
+        {% else %}<div>Ready. Run AI research to start searching for evidence.</div>{% endif %}
+    </div>
+    {% if research_job.status == "succeeded" %}<p><a href="{% url 'editorial:research_detail' package.pk %}">View saved report and evidence</a></p>{% endif %}
+    {% if research_job %}<p><a href="{% url 'production:project_jobs' package.project_id %}">View jobs, retry, or cancel</a></p>{% endif %}
+</div>

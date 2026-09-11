@@ -204,12 +204,15 @@ SOURCE_CLIP_DURATION_TOLERANCE_SECONDS = 0.35
 SOURCE_CLIP_MAX_WIDTH = 3840
 SOURCE_CLIP_MAX_HEIGHT = 2160
 SOURCE_CLIP_MAX_FRAME_RATE = 120
-from .local_settings import read_local_ai_settings
+from YoutubeContent.local_settings import read_local_ai_settings
 
 _local_ai_settings = read_local_ai_settings(BASE_DIR / "env.py") if not PRODUCTION else {}
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", _local_ai_settings.get("OPENAI_API_KEY", ""))
 OPENAI_RESEARCH_MODEL = os.environ.get(
     "OPENAI_RESEARCH_MODEL", _local_ai_settings.get("OPENAI_RESEARCH_MODEL", "gpt-6-astra")
+)
+OPENAI_REACTION_MODEL = os.environ.get(
+    "OPENAI_REACTION_MODEL", _local_ai_settings.get("OPENAI_REACTION_MODEL", OPENAI_RESEARCH_MODEL)
 )
 del _local_ai_settings
 SITE_ID = 1

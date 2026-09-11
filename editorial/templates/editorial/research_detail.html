@@ -10,11 +10,8 @@
 <section class="card">
     <h2>AI research</h2>
     <p>AI searches the web using your question, focus, and clip transcript, then adds a cited report and evidence leads. Review the findings before marking the research ready.</p>
-    {% if research_job %}
-    <p role="status">AI research: {{ research_job.get_status_display }}. Refresh to see updates.</p>
-    {% if research_job.error_message %}<p>{{ research_job.error_message }}</p>{% endif %}
-    <p><a href="{% url 'production:project_jobs' package.project_id %}">View jobs, retry, or cancel</a></p>
-    {% endif %}
+    {% include "editorial/_research_activity.html" %}
+    <p id="research-connection" class="muted" role="status"></p>
     {% if not ai_configured %}
     <p>AI research is not configured. Set OPENAI_API_KEY on the server and worker, then restart both.</p>
     {% elif research_job.status == "queued" or research_job.status == "running" %}
@@ -47,9 +44,48 @@
 <section class="card"><h2>Add evidence lead</h2><form method="post" action="{% url 'editorial:add_evidence' package.pk %}">{% csrf_token %}{{ evidence_form.as_p }}<button>Add as unverified</button></form></section>
 <form method="post" action="{% url 'editorial:mark_research_ready' package.pk %}">{% csrf_token %}<button>Confirm review and mark ready</button></form>
 {% elif package.status == "ready" %}
-<form method="post" action="{% url 'editorial:generate_reaction' package.pk %}">{% csrf_token %}<button>Generate reaction draft</button></form>
+<section class="card">
+    <h2>AI reaction script</h2>
+    <p>Create an original reaction from the selected transcript and verified evidence. Review and edit the script before approval.</p>
+    {% include "editorial/_reaction_activity.html" %}
+    <p id="reaction-connection" class="muted" role="status"></p>
+    <details><summary>Start with a basic draft instead</summary>
+    <p>A local template you can write and revise yourself. No API request.</p>
+    <form method="post" action="{% url 'editorial:generate_reaction' package.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="basic"><button>Create basic draft</button></form>
+    </details>
+</section>
 {% endif %}
 
 <h2>Reaction versions</h2>
 {% for block in reactions %}<p><a href="{% url 'editorial:reaction_detail' block.pk %}">Reaction v{{ block.version }}</a> · {{ block.get_status_display }}{% if block.used_fallback %} · deterministic fallback{% endif %}</p>{% empty %}<p class="muted">None yet.</p>{% endfor %}
+{% endblock %}
+{% block extra_body %}
+<script>
+(() => {
+    for (const kind of ['research', 'reaction']) {
+        const connection = document.getElementById(`${kind}-connection`);
+        async function poll() {
+            const activity = document.getElementById(`${kind}-activity`);
+            if (!activity || !['queued', 'running'].includes(activity.dataset.status)) return;
+            try {
+                const url = new URL(window.location.href);
+                url.searchParams.set('activity', kind === 'research' ? '1' : 'reaction');
+                const response = await fetch(url, {cache: 'no-store', signal: AbortSignal.timeout(15000)});
+                if (!response.ok || response.redirected) throw new Error('Unavailable');
+                const documentFragment = new DOMParser().parseFromString(await response.text(), 'text/html');
+                const updated = documentFragment.getElementById(`${kind}-activity`);
+                if (!updated) throw new Error('Unavailable');
+                if (activity.innerHTML !== updated.innerHTML || activity.dataset.status !== updated.dataset.status) {
+                    activity.replaceWith(updated);
+                }
+                connection.textContent = ['queued', 'running'].includes(updated.dataset.status) ? 'Updates automatically every 3 seconds.' : '';
+            } catch (error) {
+                connection.textContent = 'Unable to check progress. Retrying automatically; you can also refresh this page.';
+            }
+            window.setTimeout(poll, 3000);
+        }
+        poll();
+    }
+})();
+</script>
 {% endblock %}

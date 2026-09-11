@@ -35,5 +35,5 @@
 {% else %}
 <div class="card welcome"><p class="eyebrow">Creator Studio</p><h1>Build a reaction with evidence</h1><p>Collect transcripts, choose segments, create clips from your source media, and review the research and reaction script in one workspace.</p><p><a class="button" href="{% url 'account_login' %}">Sign in</a> <a href="{% url 'account_signup' %}">Create an account</a></p></div>
 {% endif %}
-<aside class="card" aria-labelledby="generation-note"><h2 id="generation-note">About generated suggestions</h2><p>Analysis and reaction drafts currently use built-in suggestions. A live AI provider is not connected through this interface. Review every draft, verify the evidence, and edit the script before approving it.</p></aside>
+<aside class="card" aria-labelledby="generation-note"><h2 id="generation-note">About generated suggestions</h2><p>Analysis uses built-in suggestions. AI research and reaction scripts are available when an API key is configured, with a basic local draft option. Review every draft, verify the evidence, and edit the script before approving it.</p></aside>
 {% endblock %}

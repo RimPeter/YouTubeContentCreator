@@ -12,10 +12,11 @@ class LocalAISettingsTests(SimpleTestCase):
             path = Path(directory) / "env.py"
             path.write_text(
                 '# Local settings\nOPENAI_API_KEY=test-key\nOPENAI_RESEARCH_MODEL="test-model"\n'
-                'OTHER_SECRET=ignored\nraise RuntimeError("must not run")\n', encoding="utf-8",
+                'OPENAI_REACTION_MODEL="script-model"\nOTHER_SECRET=ignored\nraise RuntimeError("must not run")\n', encoding="utf-8",
             )
             self.assertEqual(read_local_ai_settings(path), {
                 "OPENAI_API_KEY": "test-key", "OPENAI_RESEARCH_MODEL": "test-model",
+                "OPENAI_REACTION_MODEL": "script-model",
             })
 
     def test_missing_file_and_invalid_values_are_ignored(self):

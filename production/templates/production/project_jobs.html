@@ -3,10 +3,10 @@
 {% block content %}
 <h1>Processing jobs</h1>
 <p><a href="{% url 'project_detail' project.pk %}">{{ project.title }}</a> · <a href="{% url 'production:project_clips' project.pk %}">Source clips</a></p>
-<p class="muted">Clips and AI research are processed in the background. Refresh to see the latest progress.</p>
+<p class="muted">Clips, AI research, and AI scripts are processed in the background. Refresh to see the latest progress.</p>
 {% for job in jobs %}
 <article class="card">
-    <h2>{% if job.job_type == "ai_research" %}<a href="{% url 'editorial:research_detail' job.input_snapshot.package_id %}">AI research · job {{ job.pk }}</a>{% elif job.source_clip %}<a href="{% url 'production:clip_detail' job.source_clip.pk %}">Clip {{ job.source_clip.version }} · {{ job.source_clip.selected_segment.analysis_segment.title }}</a>{% else %}Job {{ job.pk }}{% endif %}</h2>
+    <h2>{% if job.job_type == "ai_research" or job.job_type == "ai_reaction" %}<a href="{% url 'editorial:research_detail' job.input_snapshot.package_id %}">{% if job.job_type == "ai_reaction" %}AI reaction script{% else %}AI research{% endif %} · job {{ job.pk }}</a>{% elif job.source_clip %}<a href="{% url 'production:clip_detail' job.source_clip.pk %}">Clip {{ job.source_clip.version }} · {{ job.source_clip.selected_segment.analysis_segment.title }}</a>{% else %}Job {{ job.pk }}{% endif %}</h2>
     <p>{{ job.get_status_display }} · {{ job.progress }}% · Attempt {{ job.attempt_count }} of {{ job.max_attempts }}</p>
     {% if job.error_message %}<p role="status">{{ job.error_message }}</p>{% endif %}
     {% if job.status == "queued" or job.status == "running" %}

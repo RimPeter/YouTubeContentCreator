@@ -283,7 +283,7 @@ class PipelineJobService:
         candidates = PipelineJob.objects.filter(
             status=PipelineJob.Status.QUEUED, available_at__lte=timezone.now(),
         ).filter(
-            Q(job_type="clip_trim", source_clip__isnull=False) | Q(job_type="ai_research")
+            Q(job_type="clip_trim", source_clip__isnull=False) | Q(job_type__in=["ai_research", "ai_reaction"])
         ).order_by("available_at", "created_at")
         for job in list(candidates[:20]):
             try:

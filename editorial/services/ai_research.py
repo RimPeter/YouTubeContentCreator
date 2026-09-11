@@ -160,7 +160,9 @@ class AIResearchService:
                 payload = cls._payload(package)
                 if fingerprint_json(payload) != job.input_fingerprint:
                     raise EditorialServiceError("Research inputs changed. Create a new research request.")
+                PipelineJobService.update_progress(job, 10)
             report = (provider or OpenAIResearchProvider()).research(payload, job.configuration_snapshot["model"])
+            PipelineJobService.update_progress(job, 80)
             # Re-read authority and inputs after the network call; cancellation wins.
             user = get_user_model().objects.get(pk=job.requested_by_id)
             with editorial_transaction(job.project_id, user):

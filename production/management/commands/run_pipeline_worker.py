@@ -6,11 +6,12 @@ from django.db import OperationalError, close_old_connections
 from production.services.clips import SourceClipError, SourceClipService
 from production.services.jobs import PipelineJobService
 from editorial.services.ai_research import AIResearchService
+from editorial.services.ai_reactions import AIReactionService
 from editorial.services.access import EditorialServiceError
 
 
 class Command(BaseCommand):
-    help = "Process queued clips and AI research, and recover expired worker attempts. Run as a supervised service."
+    help = "Process queued clips, AI research and scripts, and recover expired attempts. Run as a supervised service."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true", help="Recover expired jobs and attempt one queued job.")
@@ -35,6 +36,9 @@ class Command(BaseCommand):
                                 if job.job_type == "ai_research":
                                     package = AIResearchService.process_job(job)
                                     result = f"research {package.pk} ready for review"
+                                elif job.job_type == "ai_reaction":
+                                    block = AIReactionService.process_job(job)
+                                    result = f"reaction {block.pk} ready for review"
                                 else:
                                     clip = SourceClipService().process_job(job)
                                     result = f"clip {clip.pk} ready for review"

@@ -3,7 +3,14 @@
 {% block content %}
 <h1>Reaction v{{ reaction.version }} · {{ reaction.get_status_display }}</h1>
 <p><a href="{% url 'editorial:research_detail' reaction.research_package_id %}">Back to research v{{ reaction.research_package.version }}</a></p>
+{% if reaction.status == "generating" or reaction.status == "failed" %}
+<div class="card" role="status">
+    {% if reaction.status == "generating" %}<p>This script is still being generated. Follow Script activity on the research page.</p>{% else %}<p>This generation attempt did not produce a usable script.</p>{% endif %}
+    <p><a href="{% url 'production:project_jobs' reaction.project_id %}">View jobs, errors, retry, or cancel</a></p>
+</div>
+{% endif %}
 {% if reaction.used_fallback %}<div class="card">A deterministic transcript-only fallback was used. Review and substantially revise it as needed.</div>{% endif %}
+{% if reaction.provider %}<p class="muted">Generated with {{ reaction.provider }} / {{ reaction.provider_model }}. Review the script and its citations before approval.</p>{% endif %}
 <section class="card"><h2>Combined script</h2><div style="white-space:pre-wrap">{{ reaction.combined_script }}</div></section>
 <h2>Traceable claims</h2>
 {% for claim in reaction.claims.all %}
