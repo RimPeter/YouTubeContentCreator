@@ -21,6 +21,10 @@ class RecordingHandoffTests(EditorialTestCase):
         self.client.force_login(self.user)
 
     def post(self, route, pk, data=None):
+        data = dict(data or {})
+        if route in {"edit_timeline_creator_item", "edit_timeline_source_item", "move_timeline_item"}:
+            from editorial.models import ReactionTimelineItem
+            data["revision"] = ReactionTimelineItem.objects.get(pk=pk).revision
         response = self.client.post(reverse("editorial:" + route, args=[pk]), data or {})
         self.assertEqual(response.status_code, 302)
         return response
@@ -87,6 +91,15 @@ class RecordingHandoffTests(EditorialTestCase):
         self.clip.processed_asset.file.delete(save=False)
         self.timeline.refresh_from_db()
         self.assertTrue(any("source clip" in issue for issue in Service.readiness(self.timeline)[0]))
+
+    def test_sidebar_preserves_timeline_and_lists_multiple_versions(self):
+        another = ReactionTimelineService.create(self.timeline.reaction_draft, self.user)
+        response = self.client.get(reverse("editorial:reaction_timeline_detail", args=[self.timeline.pk]))
+        self.assertContains(response, reverse("editorial:recording_review", args=[self.timeline.pk]))
+        response = self.client.get(reverse("project_workflow", args=[self.project.pk, "timeline"]))
+        self.assertEqual(len(response.context["artifacts"]), 2)
+        self.assertIsNone(response.context["continue"])
+        self.assertContains(response, reverse("editorial:reaction_timeline_detail", args=[another.pk]))
 
     def test_ownership_and_upload_rejection(self):
         item = self.timeline.items.filter(item_type="creator").first()

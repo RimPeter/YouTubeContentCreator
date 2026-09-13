@@ -14,6 +14,7 @@
 </dl>
 <section aria-labelledby="projects-title">
     <div class="page-heading"><h2 id="projects-title">Recent projects</h2><a href="{% url 'project_list' %}">View all projects{% if archived_count %} ({{ archived_count }} archived){% endif %}</a></div>
+    <div class="project-grid">
     {% for row in project_rows %}
     <article class="card">
         <div class="page-heading">
@@ -31,6 +32,7 @@
     {% empty %}
     <div class="card"><h3>Start with a video you want to explore</h3><p>Create a project, add a YouTube transcript, and review it before choosing your clips.</p><a class="button" href="{% url 'project_create' %}">Create your first project</a></div>
     {% endfor %}
+    </div>
 </section>
 {% else %}
 <div class="card welcome"><p class="eyebrow">Creator Studio</p><h1>Build a reaction with evidence</h1><p>Collect transcripts, choose segments, create clips from your source media, and review the research and reaction script in one workspace.</p><p><a class="button" href="{% url 'account_login' %}">Sign in</a> <a href="{% url 'account_signup' %}">Create an account</a></p></div>

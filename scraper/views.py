@@ -41,6 +41,47 @@ def project_list(request):
 
 
 @login_required
+def project_workflow(request, pk, stage):
+    from django.http import Http404
+    from django.core.paginator import Paginator
+    from .workflow import navigation, collections, artifact_link
+    project = get_authorized_project(request, pk)
+    rows = navigation(project)
+    current = next((row for row in rows if row["key"] == stage), None)
+    if current is None:
+        raise Http404("Unknown workflow stage.")
+    if stage == "overview":
+        return redirect("project_detail", pk=pk)
+    groups = collections(project)
+    page = Paginator(groups[stage], 30).get_page(request.GET.get("page"))
+    artifacts = []
+    for item in page:
+        title = (getattr(item, "title", "") or getattr(item, "source_title", "") or
+                 (item.source_video.title if stage in {"analysis", "segments"} else current["label"]))
+        artifacts.append({"title": title, "pk": item.pk, "version": getattr(item, "version", None),
+                          "status": item.get_status_display() if hasattr(item, "get_status_display") else "",
+                          "url": artifact_link(stage, item, project)})
+    actions = {
+        "sources": ("Add source / manage project", "project_detail"),
+        "analysis": ("Run or inspect analysis", "analysis:project_dashboard"),
+        "selected": ("Trim and order selected segments", "analysis:project_dashboard"),
+        "plan": ("Create or manage reaction plans", "editorial:project_editorial"),
+        "clips": ("Upload media and prepare clips", "production:project_clips"),
+        "research": ("Manage research and evidence", "editorial:project_editorial"),
+        "jobs": ("Inspect processing jobs", "production:project_jobs"),
+    }
+    from django.urls import reverse
+    action = actions.get(stage)
+    return render(request, "scraper/workflow_stage.html", {
+        "project": project, "workflow_stage": stage, "workflow_navigation": rows, "stage": current,
+        "artifacts": artifacts, "page": page,
+        "continue": artifacts[0] if page.paginator.count == 1 else None,
+        "prerequisite": next(row for row in rows if row["key"] == current["prerequisite"]),
+        "action_label": action[0] if action else "", "action_url": reverse(action[1], args=[pk]) if action else "",
+    })
+
+
+@login_required
 def project_create(request):
     form = VideoProjectForm(request.POST or None)
     if request.method == "POST" and form.is_valid():

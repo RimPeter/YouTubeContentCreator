@@ -112,7 +112,7 @@ class ReactionProductionService:
             raise
 
     @classmethod
-    def approve_take(cls, take, user):
+    def approve_take(cls, take, user, *, select_only=False):
         with editorial_transaction(take.timeline_item.timeline.project_id, user):
             take = TimelineNarrationTake.objects.select_for_update().select_related(
                 "timeline_item__timeline", "media_asset"
@@ -123,13 +123,19 @@ class ReactionProductionService:
                 raise EditorialServiceError("This turn or recording is unavailable.")
             if take.script_fingerprint != cls.script_fingerprint(take.timeline_item):
                 raise EditorialServiceError("This take belongs to an older creator script.")
-            MediaAsset.objects.filter(pk=take.media_asset_id).update(status=MediaAsset.Status.APPROVED, approved_at=timezone.now())
-            take.approved_by = user
-            take.approved_at = timezone.now()
-            take.save(update_fields=["approved_by", "approved_at"])
+            if select_only and take.approved_at is None:
+                raise EditorialServiceError("Approve this take before selecting it.")
+            if not select_only:
+                MediaAsset.objects.filter(pk=take.media_asset_id).update(status=MediaAsset.Status.APPROVED, approved_at=timezone.now())
+            if not select_only:
+                take.approved_by = user
+                take.approved_at = timezone.now()
+                take.save(update_fields=["approved_by", "approved_at"])
             TimelineNarrationTake.objects.filter(timeline_item=take.timeline_item, selected=True).update(selected=False)
             take.selected = True
             take.save(update_fields=["selected"])
+            from .crud import audit
+            audit(take.timeline_item.timeline.project_id, user, "narration_selected" if select_only else "narration_approved", {"take": take.pk})
             cls.sync_timeline_status(take.timeline_item.timeline, persist=True)
             return take
 

@@ -65,6 +65,14 @@ class VideoProject(models.Model):
             raise ValidationError(errors)
 
 
+class WorkflowAudit(models.Model):
+    project = models.ForeignKey(VideoProject, on_delete=models.PROTECT, related_name="workflow_audits")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    action = models.CharField(max_length=64)
+    detail = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class SourceVideo(models.Model):
     class TranscriptStatus(models.TextChoices):
         PENDING = "pending", "Pending"

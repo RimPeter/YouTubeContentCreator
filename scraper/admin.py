@@ -24,6 +24,10 @@ class ReadOnlyArtifactAdmin(admin.ModelAdmin):
         return False
 
 
+from .models import WorkflowAudit
+admin.site.register(WorkflowAudit, ReadOnlyArtifactAdmin)
+
+
 class ReadOnlyArtifactInline(admin.TabularInline):
     can_delete = False
 

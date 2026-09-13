@@ -19,17 +19,18 @@
   <h2>Add a creator turn</h2>
   <form method="post" action="{% url 'editorial:add_timeline_creator_item' timeline.pk %}">{% csrf_token %}
     <label>Label <input name="label" maxlength="255" required></label>
-    <label>What you say <textarea name="transcript_text" rows="4" maxlength="8000" required></textarea></label>
+    <label>What you say <textarea name="transcript_text" rows="4" maxlength="10002" required></textarea></label>
     <button type="submit">Add creator turn</button>
   </form>
 </section>{% endif %}
 {% for item in items %}
-<section class="card">
+<section class="card timeline-turn {% if item.item_type == 'source' %}source-turn{% else %}creator-turn{% endif %}{% if not item.included %} excluded-turn{% endif %}">
   <h2>#{{ item.order }} · {{ item.get_item_type_display }}{% if item.label %}: {{ item.label }}{% endif %}</h2>
   {% if not item.included %}<p class="muted">Excluded from this timeline.</p>{% endif %}
   {% if item.item_type == "source" and item.source_start_seconds is not None %}
   <p class="muted">Saved source transcript · {{ item.source_start_seconds|floatformat:1 }}s{% if item.source_end_seconds is not None %}–{{ item.source_end_seconds|floatformat:1 }}s{% endif %}</p>
   {% if not is_stale %}<form method="post" action="{% url 'editorial:edit_timeline_source_item' item.pk %}">{% csrf_token %}
+    <input type="hidden" name="revision" value="{{ item.revision }}">
     <label>In <input type="number" name="source_start_seconds" min="0" step="0.1" value="{{ item.source_start_seconds }}"></label>
     <label>Out <input type="number" name="source_end_seconds" min="0" step="0.1" value="{{ item.source_end_seconds }}"></label>
     <label><input type="checkbox" name="included"{% if item.included %} checked{% endif %}> Include</label>
@@ -37,8 +38,9 @@
   </form>{% endif %}
   {% else %}
   {% if not is_stale %}<form method="post" action="{% url 'editorial:edit_timeline_creator_item' item.pk %}">{% csrf_token %}
+    <input type="hidden" name="revision" value="{{ item.revision }}">
     <label>Label <input name="label" maxlength="255" value="{{ item.label }}"></label>
-    <label>What you say <textarea name="transcript_text" rows="5" maxlength="8000">{{ item.transcript_text }}</textarea></label>
+    <label>What you say <textarea name="transcript_text" rows="5" maxlength="10002">{{ item.transcript_text }}</textarea></label>
     <label><input type="checkbox" name="included"{% if item.included %} checked{% endif %}> Include</label>
     <button type="submit">Save creator turn</button>
   </form>{% endif %}
@@ -57,6 +59,7 @@
   </details>{% endif %}
   <p>{{ item.transcript_text|linebreaksbr }}</p>
   {% if not is_stale %}<form method="post" action="{% url 'editorial:move_timeline_item' item.pk %}">{% csrf_token %}
+    <input type="hidden" name="revision" value="{{ item.revision }}">
     <button name="direction" value="up" type="submit">Move up</button>
     <button name="direction" value="down" type="submit">Move down</button>
   </form>{% endif %}

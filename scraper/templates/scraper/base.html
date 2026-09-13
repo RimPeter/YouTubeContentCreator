@@ -1,59 +1,17 @@
+{% load static project_navigation %}{% project_navigation as workflow %}
 <!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Creator Studio{% endblock %}</title>
-    <style>
-        * { box-sizing: border-box; }
-        body { font-family: system-ui, sans-serif; margin: 0; color: #1f2937; background: #f8fafc; line-height: 1.55; }
-        nav { background: #111827; padding: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.5rem; }
-        nav a { color: white; text-decoration: none; }
-        nav a:hover, a:hover { text-decoration: underline; }
-        nav a[aria-current="page"] { text-decoration: underline; text-underline-offset: .4rem; }
-        .brand { font-weight: 700; margin-right: auto; }
-        a { color: #1d4ed8; overflow-wrap: anywhere; }
-        a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid #d97706; outline-offset: 4px; }
-        .skip-link { position: absolute; top: -5rem; left: 1rem; padding: .7rem; background: white; z-index: 10; }
-        .skip-link:focus { top: .5rem; }
-        main { max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
-        .card { background: white; border: 1px solid #e5e7eb; border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
-        .messages { list-style: none; padding: 0; }
-        .messages li { background: #e0f2fe; border-radius: .25rem; padding: .75rem; margin: .5rem 0; }
-        form.inline { display: inline-block; margin-right: .5rem; }
-        button, .button { background: #2563eb; border: 0; border-radius: .25rem; color: white; cursor: pointer; display: inline-block; padding: .55rem .8rem; text-decoration: none; }
-        button.danger { background: #b91c1c; }
-        input, textarea, select { font: inherit; box-sizing: border-box; display: block; margin: .25rem 0 1rem; max-width: 100%; padding: .5rem; width: 32rem; }
-        input[type="checkbox"], input[type="radio"] { width: auto; display: inline-block; margin-right: .5rem; }
-        input[type="hidden"] { display: none; }
-        button { font: inherit; }
-        button:disabled { opacity: .55; cursor: default; }
-        .muted { color: #475569; }
-        .chunk { border-top: 1px solid #e5e7eb; padding: .75rem 0; }
-        .page-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
-        .page-heading h1, .page-heading h2, .page-heading h3 { margin: .25rem 0; }
-        .page-heading p { margin: .4rem 0; }
-        .eyebrow { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #475569; }
-        .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
-        .metrics .card { margin: 0; }
-        .metrics dd { font-size: 2rem; font-weight: 700; margin: .3rem 0 0; }
-        .metrics dt { color: #475569; font-size: .9rem; }
-        .project-links { display: flex; flex-wrap: wrap; gap: .7rem 1.5rem; margin-top: 1rem; }
-        .attention, .errorlist { color: #9a3412; }
-        .auth-card { max-width: 36rem; margin: 3rem auto; }
-        .welcome { padding: 2rem; }
-        .welcome p { max-width: 42rem; }
-        pre { overflow: auto; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: .5rem; text-align: left; overflow-wrap: anywhere; }
-        @media (max-width: 650px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .page-heading { align-items: flex-start; } .brand { width: 100%; } }
-    </style>
+    <link rel="stylesheet" href="{% static 'studio/design.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
-<nav aria-label="Main navigation">
-    <a class="brand" href="{% url 'dashboard' %}">Creator Studio</a>
+<nav class="app-header" aria-label="Main navigation">
+    <a class="brand" href="{% url 'dashboard' %}"><span class="brand-mark" aria-hidden="true">&#9654;</span>Creator Studio</a>
     <a href="{% url 'dashboard' %}"{% if request.resolver_match.url_name == 'dashboard' %} aria-current="page"{% endif %}>Dashboard</a>
     {% if user.is_authenticated %}
     <a href="{% url 'project_list' %}">Projects</a>
@@ -65,12 +23,34 @@
     <a href="{% url 'account_signup' %}">Create account</a>
     {% endif %}
 </nav>
+{% if workflow %}<div class="project-shell">
+<aside class="workflow-sidebar" aria-label="Project workflow">
+<a href="{% url 'project_list' %}">← All projects</a>
+<h2>{{ workflow.project.title }}</h2>
+<p>{{ workflow.project.get_status_display }}{% if workflow.project.is_locked %} · Locked{% endif %}</p>
+<details id="workflow-menu" open><summary>Project workflow menu</summary>
+<nav aria-label="Workflow stages">{% for entry in workflow.rows %}
+<a href="{{ entry.url }}"{% if entry.active %} aria-current="page"{% endif %}>{{ entry.label }}
+<small>{{ entry.status }}{% if entry.count %} · {{ entry.count }}{% endif %}</small></a>
+{% endfor %}</nav></details></aside>{% endif %}
 <main id="main-content" tabindex="-1">
+    {% if workflow %}<div class="workflow-breadcrumb"><a href="{% url 'project_detail' workflow.project.pk %}">{{ workflow.project.title }}</a> / <a href="{{ workflow.current.url }}">{{ workflow.current.label }}</a>{% if workflow.artifact %} / {{ workflow.artifact }}{% endif %}</div>{% endif %}
     {% if messages %}
         <ul class="messages" aria-live="polite">{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>
     {% endif %}
     {% block content %}{% endblock %}
+    <footer class="studio-footer">Creator Studio / From source to story</footer>
 </main>
+{% if workflow %}</div>{% endif %}
+{% if workflow %}<script>
+(() => {
+    const menu = document.getElementById("workflow-menu");
+    const desktop = window.matchMedia("(min-width: 801px)");
+    const resize = () => { menu.open = desktop.matches; };
+    resize();
+    desktop.addEventListener("change", resize);
+})();
+</script>{% endif %}
 {% block extra_body %}{% endblock %}
 </body>
 </html>

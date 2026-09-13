@@ -197,8 +197,10 @@ def edit_timeline_creator_item(request, item_pk):
     form = CreatorTimelineItemForm(request.POST)
     if form.is_valid():
         try:
-            ReactionTimelineService.update_creator_item(item, request.user, **form.cleaned_data)
+            ReactionTimelineService.update_creator_item(item, request.user, expected_revision=request.POST.get("revision", ""), **form.cleaned_data)
         except EditorialServiceError as exc:
+            if exc.code == "edit_conflict":
+                return timeline_conflict(request, item, form)
             messages.error(request, str(exc))
         else:
             messages.success(request, "Creator transcript turn updated.")
@@ -233,8 +235,10 @@ def edit_timeline_source_item(request, item_pk):
     form = SourceTimelineItemForm(request.POST)
     if form.is_valid():
         try:
-            ReactionTimelineService.update_source_item(item, request.user, **form.cleaned_data)
+            ReactionTimelineService.update_source_item(item, request.user, expected_revision=request.POST.get("revision", ""), **form.cleaned_data)
         except EditorialServiceError as exc:
+            if exc.code == "edit_conflict":
+                return timeline_conflict(request, item, form)
             messages.error(request, str(exc))
         else:
             messages.success(request, "Source trim updated; its saved transcript remains unchanged.")
@@ -248,10 +252,16 @@ def edit_timeline_source_item(request, item_pk):
 def move_timeline_item(request, item_pk):
     item = _timeline_item_for(request.user, item_pk)
     try:
-        ReactionTimelineService.move_item(item, request.user, request.POST.get("direction"))
+        ReactionTimelineService.move_item(item, request.user, request.POST.get("direction"), expected_revision=request.POST.get("revision", ""))
     except EditorialServiceError as exc:
         messages.error(request, str(exc))
     return redirect("editorial:reaction_timeline_detail", item.timeline_id)
+
+
+def timeline_conflict(request, item, form):
+    item.refresh_from_db()
+    return render(request, "editorial/timeline_conflict.html", {"item": item, "timeline": item.timeline,
+        "form": form, "action": request.path}, status=409)
 
 
 @login_required

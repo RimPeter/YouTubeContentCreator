@@ -1,0 +1,118 @@
+/* Creator Studio — shared, framework-free interface. */
+:root {
+  --paper:#f5f6f2; --surface:#fff; --ink:#172c29; --muted:#586962;
+  --line:#dce4de; --accent:#166653; --accent-hover:#104e40;
+  --soft:#edf5ef; --sidebar:#172e28; --danger:#a13236;
+  --radius:16px; --shadow:0 3px 18px #152d2310;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.65 "Segoe UI",system-ui,sans-serif; }
+a { color:var(--accent); text-underline-offset:4px; overflow-wrap:anywhere; }
+a:hover { color:var(--accent-hover); }
+h1,h2,h3 { line-height:1.2; letter-spacing:-.035em; text-wrap:balance; }
+h1 { font-size:clamp(1.9rem,3.5vw,3rem); font-weight:650; margin:0 0 1rem; }
+h2 { font-size:1.3rem; font-weight:650; margin:0 0 .9rem; }
+h3 { font-size:1.05rem; font-weight:650; }
+p { margin:.6rem 0 1rem; }
+small,.muted,.helptext { color:var(--muted); }
+.helptext { display:block; font-size:.85rem; }
+:focus-visible { outline:3px solid #c18b24; outline-offset:4px; }
+.skip-link { position:absolute; left:1rem; top:-100px; z-index:100; background:white; padding:.7rem; }
+.skip-link:focus { top:1rem; }
+.app-header { min-height:76px; padding:1rem clamp(1rem,3vw,3rem); display:flex; gap:1.4rem; flex-wrap:wrap; align-items:center; background:var(--surface); border-bottom:1px solid var(--line); }
+.app-header a { text-decoration:none; color:var(--muted); font-size:.88rem; font-weight:600; }
+.app-header a:hover,.app-header a[aria-current="page"] { color:var(--accent); }
+.app-header .brand { display:flex; align-items:center; gap:.7rem; margin-right:auto; color:var(--ink); font-size:1.1rem; letter-spacing:-.03em; }
+.brand-mark { display:grid; place-items:center; width:32px; height:32px; background:var(--accent); border-radius:9px; color:#fff; font-size:14px; }
+main { max-width:1180px; margin:0 auto; padding:clamp(1.2rem,3.3vw,3.3rem); min-width:0; }
+.project-shell { display:grid; grid-template-columns:268px minmax(0,1fr); min-height:calc(100vh - 76px); }
+.project-shell main { width:100%; }
+.workflow-sidebar { background:var(--sidebar); color:#e9f3ed; padding:1.5rem 1rem; position:sticky; top:0; height:100vh; overflow:auto; scrollbar-width:thin; scrollbar-color:#5c7468 transparent; }
+.workflow-sidebar > a { display:inline-block; color:#b9ccc1; margin:0 .65rem 1.1rem; font-size:.82rem; text-decoration:none; }
+.workflow-sidebar h2 { padding:0 .65rem; overflow-wrap:anywhere; font-size:1.05rem; }
+.workflow-sidebar > p { margin:0 .65rem 1.3rem; color:#b9ccc1; font-size:.8rem; }
+.workflow-sidebar nav { display:grid; gap:4px; }
+.workflow-sidebar nav a { display:block; border-radius:9px; padding:.65rem .8rem; color:#e0eae4; text-decoration:none; font-size:.86rem; border:1px solid transparent; }
+.workflow-sidebar nav a:hover { background:#ffffff0b; border-color:#ffffff12; }
+.workflow-sidebar nav a[aria-current="page"] { color:#152e26; background:#d5ebad; font-weight:650; }
+.workflow-sidebar small { display:block; color:#a6bfb0; font-size:.69rem; }
+.workflow-sidebar a[aria-current="page"] small { color:#375437; }
+.workflow-sidebar summary { color:#e9f3ed; cursor:pointer; padding:.7rem; }
+.workflow-breadcrumb { color:var(--muted); font-size:.8rem; margin:0 0 1.75rem; }
+.workflow-breadcrumb a { text-decoration:none; color:var(--muted); }
+.page-heading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1.2rem; margin-bottom:1.7rem; }
+.page-heading h1,.page-heading h2,.page-heading h3 { margin:0; }
+.page-heading p { margin:.4rem 0 0; }
+.eyebrow { font-size:.7rem; font-weight:700; letter-spacing:.17em; text-transform:uppercase; color:var(--accent); }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:clamp(1rem,2vw,1.75rem); margin:1rem 0; box-shadow:var(--shadow); min-width:0; }
+.card .card { box-shadow:none; background:#fafcf9; }
+.card > :first-child { margin-top:0; }
+.card > :last-child { margin-bottom:0; }
+.card h2 a,.card h3 a { color:var(--ink); text-decoration:none; }
+.card h2 a:hover,.card h3 a:hover { color:var(--accent); text-decoration:underline; }
+.metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin:1.5rem 0 2.5rem; }
+.metrics .card { margin:0; box-shadow:none; position:relative; overflow:hidden; }
+.metrics .card:before { content:""; display:block; width:22px; height:3px; background:var(--accent); margin-bottom:1.1rem; border-radius:2px; }
+.metrics dt { color:var(--muted); font-size:.82rem; }
+.metrics dd { margin:.5rem 0 0; font-size:2.5rem; line-height:1.1; font-weight:600; letter-spacing:-.05em; font-variant-numeric:tabular-nums; }
+.project-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1.2rem; }
+.project-grid .card { margin:0; border-top:3px solid #b7cdbb; }
+.project-links { display:flex; flex-wrap:wrap; gap:.7rem 1.3rem; border-top:1px solid var(--line); padding-top:1rem; margin-top:1.25rem; font-size:.82rem; }
+.status-pill { display:inline-flex; align-items:center; padding:.2rem .7rem; border-radius:20px; background:var(--soft); color:var(--accent); font-size:.78rem; font-weight:600; }
+.action-row { display:flex; flex-wrap:wrap; gap:.75rem; margin:1.25rem 0; }
+.button.secondary { background:var(--surface); color:var(--accent); border-color:var(--line); }
+.button.secondary:hover { background:var(--soft); border-color:var(--accent); }
+button,.button,input[type="submit"] { font:600 .85rem/1.4 "Segoe UI",system-ui,sans-serif; background:var(--accent); border:1px solid var(--accent); border-radius:9px; color:#fff; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; min-height:42px; padding:.65rem 1rem; text-decoration:none; transition:background .15s,box-shadow .15s; max-width:100%; }
+button:hover,.button:hover { background:var(--accent-hover); color:white; box-shadow:0 3px 8px #12332320; text-decoration:none; }
+button:disabled { cursor:not-allowed; opacity:.5; }
+button.danger { background:#fff3f2; color:var(--danger); border-color:#e9b9b9; }
+form.inline { display:inline-block; margin:0 .4rem .6rem 0; }
+form { margin:.85rem 0; }
+label { font-size:.87rem; font-weight:600; }
+input,textarea,select { font:inherit; color:var(--ink); display:block; margin:.45rem 0 1.1rem; width:100%; max-width:42rem; padding:.75rem .85rem; border:1px solid #cbd8cd; border-radius:9px; background:#fcfdfb; }
+input:hover,textarea:hover,select:hover { border-color:#91ab99; }
+input:focus,textarea:focus,select:focus { background:#fff; }
+textarea { min-height:110px; resize:vertical; line-height:1.65; }
+input[type="checkbox"],input[type="radio"] { width:18px; height:18px; display:inline-block; vertical-align:middle; accent-color:var(--accent); margin:.5rem .4rem .5rem 0; }
+input[type="hidden"] { display:none; }
+input[type="file"] { border-style:dashed; background:var(--soft); padding:1rem; }
+input::file-selector-button { padding:.45rem .8rem; border:1px solid var(--line); border-radius:6px; background:white; margin-right:.7rem; color:var(--ink); cursor:pointer; }
+.messages { list-style:none; padding:0; }
+.messages li { border:1px solid #b6d9c8; border-left:4px solid var(--accent); background:var(--soft); border-radius:8px; padding:1rem; margin:.7rem 0; }
+.attention,.errorlist { color:var(--danger); }
+.errorlist { padding:1rem 1rem 1rem 2rem; background:#fff0ee; border-radius:8px; }
+.chunk { border-top:1px solid var(--line); padding:1rem 0; }
+.timeline-turn { border-left:4px solid var(--accent); }
+.timeline-turn.source-turn { border-left-color:#ae843e; background:#fffdf7; }
+.timeline-turn.excluded-turn { border-left-color:#9aa49d; border-style:dashed; }
+.timeline-turn h2 { font-size:1.15rem; }
+details:not(#workflow-menu) { padding:.8rem 0; border-top:1px solid var(--line); margin-top:.8rem; }
+summary { cursor:pointer; font-size:.9rem; font-weight:600; }
+details[open] > summary { margin-bottom:1rem; }
+nav:not(.app-header):not([aria-label="Workflow stages"]) { display:flex; flex-wrap:wrap; gap:.8rem; }
+nav:not(.app-header):not([aria-label="Workflow stages"]) a { padding:.4rem .7rem; border-radius:7px; text-decoration:none; }
+nav a[aria-current="page"] { background:var(--soft); font-weight:650; }
+table { width:100%; border-collapse:collapse; font-size:.88rem; }
+th { background:var(--soft); font-weight:600; color:var(--muted); }
+th,td { padding:.9rem .75rem; text-align:left; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+pre { overflow:auto; border-radius:9px; padding:1rem; background:#edf1eb; }
+audio,video,img { max-width:100%; }
+audio { width:100%; max-width:42rem; margin:.8rem 0; }
+.auth-card { max-width:460px; margin:2rem auto; padding:2.3rem; }
+.auth-card button { width:100%; }
+.welcome { background:var(--sidebar); color:#fff; padding:clamp(2rem,6vw,5rem); border:0; }
+.welcome p { max-width:42rem; color:#d4e3d8; }
+.welcome .eyebrow { color:#d5ebad; }
+.welcome a:not(.button) { color:#d5ebad; }
+.studio-footer { margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); color:var(--muted); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; }
+@media(min-width:801px) { .workflow-sidebar summary { display:none; } }
+@media(max-width:1000px) { .project-shell { grid-template-columns:230px minmax(0,1fr); } .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:800px) {
+  .project-shell { display:block; } .workflow-sidebar { position:static; height:auto; padding:.8rem 1rem; }
+  .workflow-sidebar > a { margin-bottom:.5rem; } .workflow-sidebar h2 { margin-bottom:.4rem; }
+  .workflow-sidebar > p { margin-bottom:.4rem; } .workflow-sidebar nav { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .app-header { gap:.7rem 1rem; } .app-header .brand { flex-basis:100%; }
+}
+@media(max-width:540px) { .project-grid { grid-template-columns:1fr; } main { padding:1.25rem; } .metrics { gap:.65rem; } .metrics dd { font-size:2rem; } .auth-card { padding:1.4rem; margin:1rem 0; } th,td { padding:.5rem; } }
+@media(prefers-reduced-motion:reduce) { *,*:before,*:after { transition:none!important; scroll-behavior:auto!important; } }
+@media print { .app-header,.workflow-sidebar,.studio-footer,button,.button { display:none!important; } .project-shell { display:block; } main { padding:0; } .card { box-shadow:none; break-inside:avoid; } body { background:#fff; } }

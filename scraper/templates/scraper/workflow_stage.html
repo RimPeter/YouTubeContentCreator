@@ -1,0 +1,16 @@
+{% extends "scraper/base.html" %}
+{% block title %}{{ stage.label }} · {{ project.title }}{% endblock %}
+{% block content %}
+<h1>{{ stage.label }}</h1>
+<p>{{ stage.help }}</p>
+{% if project.is_locked or project.status == "archived" %}<p>This project is read-only. Saved versions remain available for inspection.</p>{% endif %}
+<p><a href="{{ prerequisite.url }}">{{ prerequisite.label }}</a>{% if action_url %} · <a class="button" href="{{ action_url }}">{{ action_label }}</a>{% endif %}</p>
+{% if continue %}<p><a class="button" href="{{ continue.url }}">Continue with {{ continue.title }} #{{ continue.pk }}</a></p>{% endif %}
+{% if artifacts %}<p>Choose a saved artifact. Version numbers belong to their source or parent; no version is selected automatically.</p>{% endif %}
+{% for artifact in artifacts %}<section class="card">
+<h2><a href="{{ artifact.url }}">{{ artifact.title }} #{{ artifact.pk }}{% if artifact.version %} · v{{ artifact.version }}{% endif %}</a></h2>
+<p>{{ artifact.status }}</p>
+</section>{% empty %}<div class="card"><p>No saved work in this stage yet.</p><a href="{{ prerequisite.url }}">Go to {{ prerequisite.label }}</a></div>{% endfor %}
+{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+{% if page.has_next %}<a href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+{% endblock %}

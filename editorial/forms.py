@@ -1,4 +1,5 @@
 from django import forms
+from .limits import CREATOR_TEXT_LIMIT
 
 from scraper.models import TranscriptChunk
 
@@ -84,7 +85,7 @@ class ReactionSequenceSectionForm(forms.ModelForm):
 
 class CreatorTimelineItemForm(forms.Form):
     label = forms.CharField(max_length=255)
-    transcript_text = forms.CharField(max_length=8000, widget=forms.Textarea(attrs={"rows": 5}))
+    transcript_text = forms.CharField(max_length=CREATOR_TEXT_LIMIT, widget=forms.Textarea(attrs={"rows": 5}))
     included = forms.BooleanField(required=False)
 
 

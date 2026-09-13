@@ -1,6 +1,10 @@
 {% extends "scraper/base.html" %}
 {% block title %}Editorial · {{ project.title }}{% endblock %}
 {% block content %}
+<section class="card"><h2>Reaction plans</h2>
+<p>Select segments in <a href="{% url 'analysis:project_dashboard' project.pk %}">analysis review</a> before creating a plan.</p>
+<form method="post" action="{% url 'editorial:create_reaction_plan' project.pk %}">{% csrf_token %}<button>Create reaction plan</button></form>
+{% for plan in plans %}<p><a href="{% url 'editorial:reaction_plan_detail' plan.pk %}">Plan v{{ plan.version }} · {{ plan.get_status_display }}</a></p>{% endfor %}</section>
 <h1>{{ project.title }} · research and reactions</h1>
 <p><a href="{% url 'production:project_clips' project.pk %}">Back to source clips</a></p>
 {% for clip in clips %}

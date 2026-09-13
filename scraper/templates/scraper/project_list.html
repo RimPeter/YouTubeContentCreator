@@ -1,15 +1,19 @@
 {% extends "scraper/base.html" %}
 {% block title %}Projects{% endblock %}
 {% block content %}
-<h1>Projects</h1>
-<p><a class="button" href="{% url 'project_create' %}">Create project</a></p>
+<div class="page-heading">
+    <div><p class="eyebrow">Your library</p><h1>Projects</h1><p class="muted">A workspace for every story you want to tell.</p></div>
+    <a class="button" href="{% url 'project_create' %}">Create project</a>
+</div>
+<div class="project-grid">
 {% for project in projects %}
     <article class="card">
         <h2><a href="{% url 'project_detail' project.pk %}">{{ project.title }}</a></h2>
-        <p>{{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</p>
+        <p><span class="status-pill">{{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</span></p>
         <p class="muted">{{ project.source_videos.count }} source{{ project.source_videos.count|pluralize }}</p>
     </article>
 {% empty %}
-    <p>No projects yet.</p>
+    <div class="card"><h2>Your next story starts here</h2><p>No projects yet.</p><p class="muted">Create a project to collect source transcripts and build your reaction.</p></div>
 {% endfor %}
+</div>
 {% endblock %}

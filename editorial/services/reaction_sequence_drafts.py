@@ -1,4 +1,5 @@
 import json
+from editorial.limits import REACTION_TEXT_LIMIT, BRIDGE_TEXT_LIMIT
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -93,8 +94,8 @@ class ReactionSequenceDraftService:
         for item, source in zip(sections, expected):
             if not isinstance(item, dict) or set(item) != {"plan_section_id", "reaction_text", "bridge"} or item["plan_section_id"] != source.pk:
                 raise EditorialServiceError("Reaction draft sections are out of plan order.")
-            normalized.append({"plan_section": source, "reaction_text": text(item["reaction_text"], 8000),
-                               "bridge": text(item["bridge"], 2000) if item["bridge"].strip() else ""})
+            normalized.append({"plan_section": source, "reaction_text": text(item["reaction_text"], REACTION_TEXT_LIMIT),
+                               "bridge": text(item["bridge"], BRIDGE_TEXT_LIMIT) if item["bridge"].strip() else ""})
         return {"opening": text(result["opening"], 4000), "conclusion": text(result["conclusion"], 4000),
                 "rationale": text(result["rationale"], 4000), "sections": normalized}
 

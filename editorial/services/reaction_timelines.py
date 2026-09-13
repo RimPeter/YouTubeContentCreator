@@ -5,9 +5,23 @@ from production.services.fingerprints import fingerprint_json
 
 from .access import EditorialServiceError, editorial_transaction, ensure_editorial_allowed
 from .reaction_sequence_plans import ReactionSequencePlanService
+from editorial.limits import CREATOR_TEXT_LIMIT
 
 
 class ReactionTimelineService:
+    @staticmethod
+    def check_revision(item, expected):
+        if expected is not None and str(item.revision) != str(expected):
+            raise EditorialServiceError("This turn changed in another tab. Compare your submission with the current version.", "edit_conflict")
+
+    @staticmethod
+    def changed(timeline):
+        from .reaction_production import ReactionProductionService
+        ReactionProductionService.sync_timeline_status(timeline, persist=True)
+        for assembly in timeline.production_assemblies.all():
+            if ReactionProductionService.is_assembly_stale(assembly):
+                type(assembly).objects.filter(pk=assembly.pk).update(status="stale")
+
     @staticmethod
     def current_fingerprint(draft):
         plan = draft.plan
@@ -62,27 +76,31 @@ class ReactionTimelineService:
         return timeline
 
     @classmethod
-    def update_creator_item(cls, item, user, *, label, transcript_text, included):
+    def update_creator_item(cls, item, user, *, label, transcript_text, included, expected_revision=None):
         with editorial_transaction(item.timeline.project_id, user):
             timeline = cls._current_timeline(item.timeline, user)
             item = ReactionTimelineItem.objects.select_for_update().get(pk=item.pk, timeline=timeline)
+            cls.check_revision(item, expected_revision)
             if item.item_type != ReactionTimelineItem.ItemType.CREATOR:
                 raise EditorialServiceError("Only creator transcript turns can be edited.")
             item.label = label.strip()
             item.transcript_text = transcript_text.strip()
             item.included = included
-            if not item.label or not item.transcript_text:
+            if not item.label or not item.transcript_text or len(item.transcript_text) > CREATOR_TEXT_LIMIT or len(item.label) > 255:
                 raise EditorialServiceError("Creator transcript turns need a label and text.")
-            item.save(update_fields=["label", "transcript_text", "included"])
+            item.revision += 1
+            item.save(update_fields=["label", "transcript_text", "included", "revision"])
+            cls.changed(timeline)
             return item
 
     @classmethod
-    def update_source_item(cls, item, user, *, source_start_seconds, source_end_seconds, included):
+    def update_source_item(cls, item, user, *, source_start_seconds, source_end_seconds, included, expected_revision=None):
         with editorial_transaction(item.timeline.project_id, user):
             timeline = cls._current_timeline(item.timeline, user)
             item = ReactionTimelineItem.objects.select_for_update().select_related(
                 "plan_section__selection__analysis_segment"
             ).get(pk=item.pk, timeline=timeline)
+            cls.check_revision(item, expected_revision)
             if item.item_type != ReactionTimelineItem.ItemType.SOURCE:
                 raise EditorialServiceError("Only source transcript turns can be trimmed.")
             selection = item.plan_section.selection
@@ -94,16 +112,19 @@ class ReactionTimelineService:
             item.source_start_seconds = source_start_seconds
             item.source_end_seconds = source_end_seconds
             item.included = included
-            item.save(update_fields=["source_start_seconds", "source_end_seconds", "included"])
+            item.revision += 1
+            item.save(update_fields=["source_start_seconds", "source_end_seconds", "included", "revision"])
+            cls.changed(timeline)
             return item
 
     @classmethod
-    def move_item(cls, item, user, direction):
+    def move_item(cls, item, user, direction, expected_revision=None):
         if direction not in {"up", "down"}:
             raise EditorialServiceError("Choose a valid timeline direction.")
         with editorial_transaction(item.timeline.project_id, user):
             timeline = cls._current_timeline(item.timeline, user)
             item = ReactionTimelineItem.objects.select_for_update().get(pk=item.pk, timeline=timeline)
+            cls.check_revision(item, expected_revision)
             target_order = item.order - 1 if direction == "up" else item.order + 1
             other = ReactionTimelineItem.objects.select_for_update().filter(
                 timeline=timeline, order=target_order
@@ -114,6 +135,9 @@ class ReactionTimelineService:
             ReactionTimelineItem.objects.filter(pk=item.pk).update(order=temporary_order)
             ReactionTimelineItem.objects.filter(pk=other.pk).update(order=item.order)
             ReactionTimelineItem.objects.filter(pk=item.pk).update(order=other.order)
+            from django.db.models import F
+            ReactionTimelineItem.objects.filter(pk__in=[item.pk, other.pk]).update(revision=F("revision") + 1)
+            cls.changed(timeline)
             item.refresh_from_db()
             return item
 
@@ -123,10 +147,12 @@ class ReactionTimelineService:
             timeline = cls._current_timeline(timeline, user)
             label = label.strip()
             transcript_text = transcript_text.strip()
-            if not label or not transcript_text:
+            if not label or not transcript_text or len(label) > 255 or len(transcript_text) > CREATOR_TEXT_LIMIT:
                 raise EditorialServiceError("Creator transcript turns need a label and text.")
             order = (timeline.items.aggregate(latest=Max("order"))["latest"] or 0) + 1
-            return ReactionTimelineItem.objects.create(
+            item = ReactionTimelineItem.objects.create(
                 timeline=timeline, order=order, item_type=ReactionTimelineItem.ItemType.CREATOR,
                 label=label, transcript_text=transcript_text,
             )
+            cls.changed(timeline)
+            return item

@@ -1,6 +1,8 @@
 {% extends "scraper/base.html" %}
 {% block title %}Research v{{ package.version }}{% endblock %}
 {% block content %}
+<form method="post" action="{% url 'editorial:revise' 'research' package.pk %}">{% csrf_token %}<button>Create editable revision</button></form>
+{% if package.status == "draft" %}<a href="{% url 'editorial:edit_research' package.pk %}">Edit research question and focus</a>{% endif %}
 <h1>Research v{{ package.version }} · {{ package.get_status_display }}</h1>
 <p><a href="{% url 'editorial:project_editorial' package.project_id %}">Back to {{ package.project.title }} editorial</a></p>
 <section class="card"><h2>{{ package.research_question }}</h2><p>{{ package.editorial_focus }}</p>
@@ -33,6 +35,7 @@
     {% if evidence.source_origin == "provider" %}<p class="muted">Found by AI research</p>{% endif %}
     <p><strong>Finding:</strong> {{ evidence.finding }}</p><p><strong>Relevance:</strong> {{ evidence.relevance }}</p>
     {% if package.status == "draft" %}
+    <a href="{% url 'editorial:edit_evidence' evidence.pk %}">Edit evidence details</a>
     <form class="inline" method="post" action="{% url 'editorial:verify_evidence' evidence.pk %}">{% csrf_token %}<button>Verify</button></form>
     <form class="inline" method="post" action="{% url 'editorial:reject_evidence' evidence.pk %}">{% csrf_token %}<button>Reject</button></form>
     <form class="inline" method="post" action="{% url 'editorial:delete_evidence' evidence.pk %}">{% csrf_token %}<button class="danger">Delete</button></form>

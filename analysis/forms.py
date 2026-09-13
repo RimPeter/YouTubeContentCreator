@@ -27,7 +27,7 @@ class SegmentSelectionForm(forms.Form):
         end = cleaned.get("reviewed_end_seconds")
         if (start is None) != (end is None):
             raise forms.ValidationError("Provide both reviewed boundaries or neither.")
-        if start is not None and end < start:
+        if start is not None and end <= start:
             raise forms.ValidationError("Reviewed end must not precede reviewed start.")
         return cleaned
 

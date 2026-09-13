@@ -32,7 +32,11 @@
 {% if take.approved_at %} · approved{% endif %}{% if take.selected %} · selected{% endif %}{% if not take.is_current %} · older script{% endif %}</p>
 <audio controls preload="none" src="{% url 'editorial:timeline_take_media' take.pk %}"></audio>
 <p>{{ take.recording_notes }}</p>
-{% if take.is_current %}<form method="post" action="{% url 'editorial:approve_timeline_narration' take.pk %}">{% csrf_token %}
+{% if take.selected or take.approved_at %}<form method="post" action="{% url 'editorial:withdraw_take' take.pk %}">{% csrf_token %}
+{% if take.selected %}<button name="action" value="deselect">Clear selection</button>{% endif %}
+{% if take.approved_at %}<button name="action" value="revoke">Revoke approval</button>{% endif %}
+</form>{% endif %}
+{% if take.is_current %}<form method="post" action="{% if take.approved_at %}{% url 'editorial:select_take' take.pk %}{% else %}{% url 'editorial:approve_timeline_narration' take.pk %}{% endif %}">{% csrf_token %}
 <button>{% if take.approved_at %}Select this take{% else %}Approve and select this take{% endif %}</button></form>{% endif %}
 </div>
 {% endfor %}

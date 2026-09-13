@@ -75,7 +75,7 @@ class SelectionService:
             raise SelectionValidationError("Reviewed boundaries must be finite numbers.")
         if reviewed_start < segment.start_seconds or reviewed_end > segment.end_seconds:
             raise SelectionValidationError("Reviewed boundaries must remain within the segment.")
-        if reviewed_end < reviewed_start:
+        if reviewed_end <= reviewed_start:
             raise SelectionValidationError("Reviewed end must not precede reviewed start.")
 
     @classmethod

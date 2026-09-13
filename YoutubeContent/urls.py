@@ -2,10 +2,13 @@ from django.contrib import admin
 from django.urls import include, path
 
 from scraper import views as scraper_views
+from scraper.ownership import reassign
 from users.views import dashboard, profile
 
 
 urlpatterns = [
+    path("projects/<int:pk>/reassign/", reassign, name="reassign_imported_project"),
+    path("projects/<int:pk>/workflow/<str:stage>/", scraper_views.project_workflow, name="project_workflow"),
     path("", dashboard, name="dashboard"),
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),

@@ -1,0 +1,13 @@
+{% extends "scraper/base.html" %}
+{% block content %}
+<h1>This turn changed while you were editing</h1>
+<h2>Current saved version</h2>
+<p>{{ item.label }} · {{ item.source_start_seconds }}–{{ item.source_end_seconds }} · Included: {{ item.included }}</p>
+{{ item.transcript_text|linebreaks }}
+<h2>Your submitted version</h2>
+<p>Compare the versions and reconcile your changes before saving.</p>
+<form method="post" action="{{ action }}">{% csrf_token %}
+<input type="hidden" name="revision" value="{{ item.revision }}">
+{{ form.as_p }}<button>Save reconciled version</button></form>
+<a href="{% url 'editorial:reaction_timeline_detail' item.timeline_id %}">Keep current version</a>
+{% endblock %}

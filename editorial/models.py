@@ -230,6 +230,7 @@ class ReactionTimeline(models.Model):
 
 
 class ReactionTimelineItem(models.Model):
+    revision = models.PositiveIntegerField(default=1)
     class ItemType(models.TextChoices):
         SOURCE = "source", "Source"
         CREATOR = "creator", "Creator"

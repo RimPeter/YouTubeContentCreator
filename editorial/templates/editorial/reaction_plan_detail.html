@@ -1,6 +1,7 @@
 {% extends "scraper/base.html" %}
 {% block title %}Reaction plan v{{ plan.version }} · {{ plan.project.title }}{% endblock %}
 {% block content %}
+<form method="post" action="{% url 'editorial:revise' 'plan' plan.pk %}">{% csrf_token %}<button>Create editable revision</button></form>
 <h1>Continuous reaction plan v{{ plan.version }}</h1>
 <p><a href="{% url 'project_detail' plan.project_id %}">{{ plan.project.title }}</a></p>
 <p>{{ plan.get_status_display }}{% if is_stale %} · stale{% endif %}</p>

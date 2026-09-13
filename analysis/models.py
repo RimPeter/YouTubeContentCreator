@@ -252,7 +252,7 @@ class SegmentSelection(models.Model):
             models.CheckConstraint(
                 condition=(
                     models.Q(reviewed_start_seconds__isnull=True)
-                    | models.Q(reviewed_end_seconds__gte=models.F("reviewed_start_seconds"))
+                    | models.Q(reviewed_end_seconds__gt=models.F("reviewed_start_seconds"))
                 ),
                 name="selection_reviewed_time_order",
             ),

@@ -1,11 +1,16 @@
 {% extends "scraper/base.html" %}
 {% block title %}{{ project.title }}{% endblock %}
 {% block content %}
-<h1>{{ project.title }}</h1>
+<div class="page-heading"><div><p class="eyebrow">Project overview</p><h1>{{ project.title }}</h1></div><span class="status-pill">{{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</span></div>
+{% if user.is_staff or user.is_superuser %}<p><a href="{% url 'reassign_imported_project' project.pk %}">Reassign imported project</a></p>{% endif %}
+{% if workflow %}<section class="card"><h2>Continue your project</h2>
+<p><a class="button" href="{{ workflow.next_step.url }}">{{ workflow.next_step.label }}</a></p>
+<p>{{ workflow.next_step.help }}</p>
+<p>Source clip preparation and research can proceed alongside reaction planning.</p></section>{% endif %}
 <p>Status: {{ project.get_status_display }}{% if project.is_locked %} · Locked{% endif %}</p>
 {% if project.description %}<p>{{ project.description }}</p>{% endif %}
-<p><a class="button" href="{% url 'analysis:project_dashboard' project.pk %}">Transcript analysis</a></p>
-<p><a class="button" href="{% url 'production:project_clips' project.pk %}">Source clips</a></p>
+<div class="action-row"><a class="button secondary" href="{% url 'analysis:project_dashboard' project.pk %}">Transcript analysis</a>
+<a class="button secondary" href="{% url 'production:project_clips' project.pk %}">Source clips</a></div>
 
 {% if project.content_is_mutable %}
     <p><a class="button" href="{% url 'project_update' project.pk %}">Edit project</a></p>

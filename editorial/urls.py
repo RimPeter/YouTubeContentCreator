@@ -4,8 +4,14 @@ from django.urls import path
 app_name = "editorial"
 
 from . import views
+from . import crud_views
 
 urlpatterns = [
+    path("timeline-narrations/<int:pk>/select/", crud_views.select_take, name="select_take"),
+    path("research/<int:pk>/edit/", crud_views.correction, {"kind": "research"}, name="edit_research"),
+    path("evidence/<int:pk>/edit/", crud_views.correction, {"kind": "evidence"}, name="edit_evidence"),
+    path("revisions/<str:kind>/<int:pk>/", crud_views.revise, name="revise"),
+    path("timeline-narrations/<int:pk>/withdraw/", crud_views.withdraw, name="withdraw_take"),
     path("reaction-assemblies/<int:assembly_pk>/script/", views.assembly_script_download, name="assembly_script_download"),
     path("reaction-timelines/<int:timeline_pk>/recording/", views.recording_review, name="recording_review"),
     path("reaction-timelines/<int:timeline_pk>/recording/ready/", views.review_recording_script, name="review_recording_script"),
