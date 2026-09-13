@@ -1,7 +1,7 @@
 from django.contrib import admin
 from scraper.admin import ReadOnlyArtifactAdmin, ReadOnlyArtifactInline
 
-from .models import AnalysisRun, AnalysisSegment, SegmentSelection
+from .models import AnalysisRun, AnalysisSegment, AnalysisSegmentReview, SegmentSelection
 
 
 class AnalysisSegmentInline(ReadOnlyArtifactInline):
@@ -40,6 +40,13 @@ class AnalysisSegmentAdmin(ReadOnlyArtifactAdmin):
     list_display = ("analysis_run", "order", "title", "aggregate_score")
     ordering = ("analysis_run", "order")
     search_fields = ("title", "summary", "source_text")
+
+
+@admin.register(AnalysisSegmentReview)
+class AnalysisSegmentReviewAdmin(ReadOnlyArtifactAdmin):
+    list_display = ("analysis_segment", "decision", "reviewed_by", "created_at")
+    list_filter = ("decision",)
+    search_fields = ("analysis_segment__title", "reason")
 
 
 @admin.register(SegmentSelection)

@@ -1,14 +1,16 @@
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings
+from unittest.mock import patch
 from django.urls import reverse
 
-from analysis.models import AnalysisRun, SegmentSelection
+from analysis.models import AnalysisRun, AnalysisSegmentReview, SegmentSelection
 from scraper.models import VideoProject
 
 from .helpers import create_approved_source
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
+@override_settings(OPENAI_API_KEY="")
 class AnalysisViewIntegrationTests(TestCase):
     def setUp(self):
         self.user, self.project, self.source, self.chunks = create_approved_source(
@@ -98,6 +100,26 @@ class AnalysisViewIntegrationTests(TestCase):
             list(self.project.segment_selections.values_list("pk", flat=True)),
         )
 
+    def test_exclusion_is_visible_and_can_be_restored_by_selecting(self):
+        run = self.run_analysis()
+        segment = run.segments.first()
+        response = self.client.post(
+            reverse("analysis:exclude_segment", args=[segment.pk]),
+            {"reason": "Too broad for a standalone clip."},
+        )
+        self.assertRedirects(response, reverse("analysis:run_detail", args=[run.pk]))
+        review = AnalysisSegmentReview.objects.get()
+        self.assertEqual((review.decision, review.reason), ("excluded", "Too broad for a standalone clip."))
+        detail = self.client.get(reverse("analysis:run_detail", args=[run.pk]))
+        self.assertContains(detail, "Excluded")
+        self.assertContains(detail, "Too broad for a standalone clip.")
+        self.client.post(reverse("analysis:select_segment", args=[segment.pk]), {})
+        self.assertTrue(SegmentSelection.objects.active().filter(analysis_segment=segment).exists())
+        self.assertEqual(
+            AnalysisSegmentReview.objects.order_by("-pk").first().decision,
+            "selected",
+        )
+
     def test_cross_user_objects_are_hidden_and_locked_project_rejects_run(self):
         run = self.run_analysis()
         segment = run.segments.first()
@@ -148,3 +170,47 @@ class AnalysisViewIntegrationTests(TestCase):
             response,
             reverse("analysis:project_dashboard", args=[self.project.pk]),
         )
+
+    @override_settings(OPENAI_API_KEY="test-secret", OPENAI_ANALYSIS_MODEL="test-model")
+    @patch("analysis.views.OpenAITranscriptAnalysisProvider")
+    def test_run_analysis_uses_topic_provider_when_configured(self, provider_class):
+        provider = provider_class.return_value
+        provider.name = "openai"
+        provider.model = "test-model"
+        provider.prompt_version = "topic-segmentation-v1"
+        provider.analyze.return_value = {
+            "segments": [{
+                "start_sequence": 1,
+                "end_sequence": 4,
+                "title": "One conversation topic",
+                "summary": "All transcript chunks discuss one topic.",
+                "topic_labels": ["topic"],
+                "scores": {
+                    "relevance": 80, "clarity": 80, "factual_density": 80, "novelty": 80,
+                    "controversy": 80, "reaction_potential": 80, "clip_suitability": 80,
+                },
+                "rationale": "The discussion stays on one topic.",
+                "editorial_recommendation": {
+                    "primary_approach": "critic",
+                    "secondary_approaches": ["verify"],
+                    "confidence": 82,
+                    "reasoning": "The segment contains a clear claim to assess.",
+                    "suggested_angle": "Test the claim against a practical counterexample.",
+                    "research_needed": True,
+                },
+            }],
+        }
+        response = self.client.post(
+            reverse("analysis:run_analysis", args=[self.source.pk]),
+            {"fallback_max_chunks": 2, "max_provider_attempts": 1},
+        )
+        run = AnalysisRun.objects.get()
+        self.assertRedirects(response, reverse("analysis:run_detail", args=[run.pk]))
+        provider_class.assert_called_once_with()
+        self.assertFalse(run.used_fallback)
+        self.assertEqual(run.provider, "openai")
+        self.assertEqual(run.model, "test-model")
+        self.assertEqual(run.segments.get().title, "One conversation topic")
+        detail = self.client.get(reverse("analysis:run_detail", args=[run.pk]))
+        self.assertContains(detail, "Suggested approach: Critic")
+        self.assertContains(detail, "Research recommended before use.")

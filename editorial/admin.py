@@ -1,7 +1,8 @@
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
 
-from .models import EvidenceSource, ReactionBlock, ReactionClaim, ResearchPackage
+from .models import (EvidenceSource, ReactionBlock, ReactionClaim, ReactionSequencePlan,
+                     ReactionSequenceSection, ReactionTimeline, ReactionTimelineItem, ResearchPackage)
 
 
 class ReadOnlyEditorialAdmin:
@@ -68,3 +69,45 @@ class EvidenceSourceAdmin(ReadOnlyEditorialAdmin, admin.ModelAdmin):
 class ReactionClaimAdmin(ReadOnlyEditorialAdmin, admin.ModelAdmin):
     list_display = ("reaction_block", "order", "claim_type", "transcript_chunk", "evidence_source")
     list_filter = ("claim_type",)
+
+
+class ReactionSequenceSectionInline(ReadOnlyEditorialAdmin, admin.TabularInline):
+    model = ReactionSequenceSection
+    extra = 0
+
+
+class ReactionTimelineItemInline(ReadOnlyEditorialAdmin, admin.TabularInline):
+    model = ReactionTimelineItem
+    extra = 0
+
+
+@admin.register(ReactionSequencePlan)
+class ReactionSequencePlanAdmin(ReadOnlyEditorialAdmin, admin.ModelAdmin):
+    list_display = ("project", "version", "status", "created_by", "created_at")
+    list_filter = ("status",)
+    inlines = (ReactionSequenceSectionInline,)
+
+
+@admin.register(ReactionTimeline)
+class ReactionTimelineAdmin(ReadOnlyEditorialAdmin, admin.ModelAdmin):
+    list_display = ("reaction_draft", "version", "status", "created_by", "created_at")
+    list_filter = ("status",)
+    inlines = (ReactionTimelineItemInline,)
+
+
+from .models import ReactionProductionAssembly, ReactionProductionAssemblyItem, TimelineNarrationTake
+
+
+class AssemblyItemInline(ReadOnlyEditorialAdmin, admin.TabularInline):
+    model = ReactionProductionAssemblyItem
+    extra = 0
+
+
+@admin.register(ReactionProductionAssembly)
+class AssemblyAdmin(ReadOnlyEditorialAdmin, admin.ModelAdmin):
+    inlines = (AssemblyItemInline,)
+
+
+@admin.register(TimelineNarrationTake)
+class TimelineTakeAdmin(ReadOnlyEditorialAdmin, admin.ModelAdmin):
+    list_display = ("timeline_item", "version", "selected", "approved_at")

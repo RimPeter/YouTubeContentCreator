@@ -1,7 +1,12 @@
 from django.contrib import admin
 from scraper.admin import ReadOnlyArtifactAdmin
 
-from .models import ArtifactDependency, MediaAsset, PipelineJob, SourceClip
+from .models import ArtifactDependency, MediaAsset, PipelineJob, SourceClip, NarrationTake
+
+
+@admin.register(NarrationTake)
+class NarrationTakeAdmin(ReadOnlyArtifactAdmin):
+    list_display = ("reaction", "version", "project", "created_at")
 
 
 @admin.register(MediaAsset)

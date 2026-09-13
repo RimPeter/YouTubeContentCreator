@@ -12,6 +12,20 @@
 {% if reaction.used_fallback %}<div class="card">A deterministic transcript-only fallback was used. Review and substantially revise it as needed.</div>{% endif %}
 {% if reaction.provider %}<p class="muted">Generated with {{ reaction.provider }} / {{ reaction.provider_model }}. Review the script and its citations before approval.</p>{% endif %}
 <section class="card"><h2>Combined script</h2><div style="white-space:pre-wrap">{{ reaction.combined_script }}</div></section>
+{% if reaction.status == "approved" %}
+<section class="card">
+    <h2>Narration recording</h2>
+    <p>Record this approved script, then upload WAV, MP3, M4A, or AAC audio. The recording stays attached to this exact script version.</p>
+    <form method="post" enctype="multipart/form-data" action="{% url 'editorial:upload_narration' reaction.pk %}">{% csrf_token %}{{ narration_form.as_p }}<button>Validate narration recording</button></form>
+</section>
+{% for take in narration_takes %}
+<section class="card"><h3>Narration take v{{ take.version }}</h3>
+    <audio controls preload="metadata" src="{% url 'production:stream_narration' take.pk %}"></audio>
+    <p>{{ take.media_asset.duration_seconds }} seconds · {{ take.media_asset.detected_mime_type }} · {{ take.media_asset.byte_size }} bytes</p>
+    <p class="muted">Attached to this exact approved script.</p>
+</section>
+{% empty %}<p class="muted">No narration recording uploaded yet.</p>{% endfor %}
+{% endif %}
 <h2>Traceable claims</h2>
 {% for claim in reaction.claims.all %}
 <section class="card"><strong>{{ claim.order }}. {{ claim.get_claim_type_display }}</strong><p>{{ claim.text }}</p>

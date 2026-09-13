@@ -47,6 +47,17 @@ def scores(value=80):
     return {name: value for name in SCORE_NAMES}
 
 
+def editorial_recommendation(primary="critic", secondary=None, research_needed=False):
+    return {
+        "primary_approach": primary,
+        "secondary_approaches": secondary or [],
+        "confidence": 80,
+        "reasoning": "The segment has a clear claim worth addressing editorially.",
+        "suggested_angle": "Add a concrete audience-facing perspective to this claim.",
+        "research_needed": research_needed,
+    }
+
+
 def valid_provider_output():
     return {
         "segments": [
@@ -58,6 +69,7 @@ def valid_provider_output():
                 "topic_labels": ["first"],
                 "scores": scores(80),
                 "rationale": "Strong opening reaction material.",
+                "editorial_recommendation": editorial_recommendation("reflect"),
             },
             {
                 "start_sequence": 3,
@@ -67,6 +79,7 @@ def valid_provider_output():
                 "topic_labels": ["second"],
                 "scores": scores(60),
                 "rationale": "Useful follow-up reaction material.",
+                "editorial_recommendation": editorial_recommendation("verify", research_needed=True),
             },
         ]
     }

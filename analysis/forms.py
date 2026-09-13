@@ -30,3 +30,12 @@ class SegmentSelectionForm(forms.Form):
         if start is not None and end < start:
             raise forms.ValidationError("Reviewed end must not precede reviewed start.")
         return cleaned
+
+
+class SegmentExclusionForm(forms.Form):
+    reason = forms.CharField(
+        required=False,
+        max_length=2000,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Optional reason for excluding this suggestion.",
+    )

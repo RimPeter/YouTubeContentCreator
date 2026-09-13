@@ -214,6 +214,9 @@ OPENAI_RESEARCH_MODEL = os.environ.get(
 OPENAI_REACTION_MODEL = os.environ.get(
     "OPENAI_REACTION_MODEL", _local_ai_settings.get("OPENAI_REACTION_MODEL", OPENAI_RESEARCH_MODEL)
 )
+OPENAI_ANALYSIS_MODEL = os.environ.get(
+    "OPENAI_ANALYSIS_MODEL", _local_ai_settings.get("OPENAI_ANALYSIS_MODEL", OPENAI_RESEARCH_MODEL)
+)
 del _local_ai_settings
 SITE_ID = 1
 

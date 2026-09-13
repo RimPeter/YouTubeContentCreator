@@ -1,0 +1,45 @@
+{% extends "scraper/base.html" %}
+{% block content %}
+<h1>Recording review · Timeline v{{ timeline.version }}</h1>
+<p><a href="{% url 'editorial:reaction_timeline_detail' timeline.pk %}">Edit timeline</a> ·
+<a href="{% url 'editorial:recording_script_download' timeline.pk %}">Download recording script</a> ·
+<a href="{% url 'production:project_clips' timeline.project_id %}">Manage source clips</a></p>
+<p><strong>{{ timeline.get_status_display }}</strong></p>
+<p>Source: {{ source_duration|floatformat:1 }}s · Selected narration: {{ narration_duration|floatformat:1 }}s · Estimated runtime: {{ estimated|floatformat:1 }}s</p>
+<p>Unrecorded creator turns are estimated at 150 words per minute.</p>
+{% if issues %}<ul>{% for issue in issues %}<li>{{ issue }}</li>{% endfor %}</ul>{% endif %}
+<form method="post" action="{% url 'editorial:review_recording_script' timeline.pk %}">{% csrf_token %}
+<button>I've reviewed this script — ready for recording</button></form>
+{% for row in rows %}
+<section class="card">
+<h2>#{{ row.item.order }} {{ row.item.get_item_type_display }}: {{ row.item.label }}</h2>
+{% if row.item.item_type == "source" %}
+<p>Playback range: {{ row.item.source_start_seconds }}s–{{ row.item.source_end_seconds }}s · {{ row.duration|floatformat:1 }}s</p>
+{% if row.clip %}<a href="{% url 'production:clip_detail' row.clip.pk %}">Inspect approved clip</a>{% endif %}
+<details><summary>Full source transcript context (may extend beyond the trim)</summary>{{ row.item.transcript_text|linebreaks }}</details>
+{% else %}
+<p>{{ row.words }} words · {{ row.duration|floatformat:1 }}s {% if not row.take %}(estimated){% endif %}</p>
+<div>{{ row.item.transcript_text|linebreaks }}</div>
+{% if row.take %}<p>Selected: take v{{ row.take.version }}</p>{% else %}<p>No approved current take selected.</p>{% endif %}
+<form method="post" enctype="multipart/form-data" action="{% url 'editorial:upload_timeline_narration' row.item.pk %}">{% csrf_token %}
+<input type="hidden" name="recording_screen" value="1">
+{{ row.form.as_p }}
+<label>Recording notes <textarea name="recording_notes" maxlength="5000"></textarea></label>
+<button>Upload new take</button></form>
+{% for take in row.takes %}
+<div class="card">
+<p>Take v{{ take.version }} · {{ take.media_asset.duration_seconds }}s · {{ take.created_by }} · {{ take.created_at }}
+{% if take.approved_at %} · approved{% endif %}{% if take.selected %} · selected{% endif %}{% if not take.is_current %} · older script{% endif %}</p>
+<audio controls preload="none" src="{% url 'editorial:timeline_take_media' take.pk %}"></audio>
+<p>{{ take.recording_notes }}</p>
+{% if take.is_current %}<form method="post" action="{% url 'editorial:approve_timeline_narration' take.pk %}">{% csrf_token %}
+<button>{% if take.approved_at %}Select this take{% else %}Approve and select this take{% endif %}</button></form>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+</section>
+{% endfor %}
+{% if not issues %}<form method="post" action="{% url 'editorial:create_reaction_assembly' timeline.pk %}">{% csrf_token %}<button>Create new assembly version</button></form>{% endif %}
+<h2>Assembly history</h2>
+{% for assembly in assemblies %}<p><a href="{% url 'editorial:reaction_assembly_detail' assembly.pk %}">Assembly v{{ assembly.version }} · {{ assembly.created_at }}</a></p>{% empty %}<p>No assembly yet.</p>{% endfor %}
+{% endblock %}

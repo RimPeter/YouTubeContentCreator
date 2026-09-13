@@ -1,8 +1,10 @@
 # Creator Studio
 
+Reaction Timelines now have a recording review screen. Review the included script to mark it ready for recording, upload narration, listen to takes, and explicitly approve/select one take per creator turn. Text, order, inclusion or trim edits require another script review; matching recordings remain available. The screen shows duration estimates, missing media, and assembly history. A handoff assembly saves exact media references, checksums, ranges, durations and transcript text; downloads use its saved script. Older assemblies without these snapshots remain stale history. Video rendering is a later step.
+
 A Django workspace for reviewing YouTube transcripts, selecting segments, producing clips from authorized source media, collecting evidence, and approving reaction scripts. Project owners see their own work; staff can review all projects.
 
-The dashboard shows current reviews, active jobs, failed job history, and the next available step. Analysis uses built-in suggestions. AI web research and reaction-script generation are available when an OpenAI API key is configured; a basic local reaction draft is also available. Final video assembly and publishing are not connected in the application.
+The dashboard shows current reviews, active jobs, failed job history, and the next available step. When an OpenAI API key is configured, analysis groups transcripts into topic-aware segments; otherwise it uses clearly marked deterministic sections. AI web research and reaction-script generation are also available with an OpenAI API key; a basic local reaction draft is available. Final video assembly and publishing are not connected in the application.
 
 ## Local setup
 
@@ -38,6 +40,7 @@ In a second terminal, run the worker with the same virtual environment and confi
 4. Approve a validated clip, create research, add and verify evidence, and mark the research ready.
    Use **Suggest research directions** beside the research form to get three editable question/focus pairs based on the selected segment's transcript. Suggestions use local topic rules and transcript excerpts, with general claim-checking prompts for other topics. They do not search the web or verify claims. Reviewing suggestions does not save a package; choose **Create research package with this direction** when ready.
 5. On ready research, choose **Generate AI reaction draft** and follow Script activity. Open **Review generated script** when it completes, edit its sections and claims, review evidence and originality, then approve it. **Start with a basic draft instead** creates a local template without API usage.
+6. On an approved reaction, upload an audio-only narration recording. The app validates WAV, MP3, M4A, or AAC media, measures duration, and keeps it attached to the exact approved script. Playback is available only to users with project access.
 
 Changing a selection or source invalidates affected clips and editorial work. **Stale** means an input changed and the result must be regenerated before approval. Deselection retires the selection, preserving its clip history. Reselecting creates a new active selection. Historical versions remain accessible for review; approved history cannot be edited in admin. To switch to a new analysis run for a source, retire its previous selections first. Transcript approval protects the source text; create another project when a different transcript is required.
 
@@ -61,7 +64,11 @@ On a failure, open the project's **Jobs** page, inspect the error, fix the cause
 
 ### AI web research
 
-Configure `OPENAI_API_KEY` in the environments used by both Django and the worker, then restart both. Keep the key private; do not enter it into a research form or commit it. `.env` files are not loaded automatically. `OPENAI_RESEARCH_MODEL` defaults to `gpt-6-astra` and can be set to another Responses API model supporting web search that your API account can access.
+Configure `OPENAI_API_KEY` in the environments used by Django and the worker, then restart both. Keep the key private; do not enter it into a form or commit it. `.env` files are not loaded automatically. `OPENAI_RESEARCH_MODEL` defaults to `gpt-6-astra` and can be set to another Responses API model supporting web search that your API account can access.
+
+### AI transcript analysis
+
+`OPENAI_ANALYSIS_MODEL` defaults to the research model and may be set to a Responses API model that supports Structured Outputs. On an approved, unlocked project, **Run new analysis** sends ordered timestamped transcript chunks to the provider and asks it to create contiguous conversation-topic segments. Each segment is validated for complete transcript coverage, chronological boundaries, text limits, and valid scores before it is saved. If the provider is unavailable, refuses, or produces invalid output after the configured attempts, the analysis is saved as a clearly marked deterministic fallback. The request does not send video or local files, and the API response is not stored by OpenAI (`store: false`).
 
 For local development, the ignored root `env.py` file can alternatively contain `OPENAI_API_KEY=...`, `OPENAI_RESEARCH_MODEL=...`, and `OPENAI_REACTION_MODEL=...` entries (quoted values also work). Only those three settings are read as data; Python code in that file is never executed. Explicit environment variables take precedence. Production ignores this file. Restart the server and worker after changing it.
 

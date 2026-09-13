@@ -1,9 +1,10 @@
 from unittest.mock import patch
+from copy import deepcopy
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from analysis.models import AnalysisRun, AnalysisSegment, SegmentSelection
+from analysis.models import AnalysisRun, AnalysisSegment, AnalysisSegmentReview, SegmentSelection
 from analysis.services import (
     AnalysisInputError,
     AnalysisPermissionError,
@@ -50,6 +51,10 @@ class AnalysisServiceTests(TestCase):
             [(1, 2), (3, 4)],
         )
         self.assertEqual(str(run.segments.get(order=1).aggregate_score), "80.000")
+        self.assertEqual(
+            run.segments.get(order=1).editorial_recommendation["primary_approach"],
+            "reflect",
+        )
         self.assertEqual(provider.calls, 1)
 
     def test_malformed_provider_retries_then_uses_deterministic_fallback(self):
@@ -75,6 +80,9 @@ class AnalysisServiceTests(TestCase):
         self.assertTrue(run.used_fallback)
         self.assertEqual(run.error_code, "")
         self.assertEqual(run.segments.count(), 2)
+        recommendation = run.segments.first().editorial_recommendation
+        self.assertEqual(recommendation["primary_approach"], "add_on")
+        self.assertEqual(recommendation["confidence"], 0.0)
 
     def test_successful_provider_retry_does_not_claim_fallback(self):
         provider = FakeProvider([RuntimeError("temporary failure"), valid_provider_output()])
@@ -202,6 +210,24 @@ class AnalysisServiceTests(TestCase):
             with self.subTest(output=output), self.assertRaises(AnalysisOutputValidationError):
                 validate_provider_output(output, chunks, DEFAULT_SCORE_WEIGHTS)
 
+    def test_structured_validation_rejects_invalid_editorial_recommendations(self):
+        chunks = ordered_transcript_chunks(self.source)
+        cases = []
+        missing = deepcopy(valid_provider_output())
+        del missing["segments"][0]["editorial_recommendation"]
+        cases.append(missing)
+        duplicate_secondary = deepcopy(valid_provider_output())
+        duplicate_secondary["segments"][0]["editorial_recommendation"]["secondary_approaches"] = [
+            "verify", "verify"
+        ]
+        cases.append(duplicate_secondary)
+        invalid_primary = deepcopy(valid_provider_output())
+        invalid_primary["segments"][0]["editorial_recommendation"]["primary_approach"] = "debunk"
+        cases.append(invalid_primary)
+        for output in cases:
+            with self.subTest(output=output), self.assertRaises(AnalysisOutputValidationError):
+                validate_provider_output(output, chunks, DEFAULT_SCORE_WEIGHTS)
+
 
 class SelectionServiceTests(TestCase):
     def setUp(self):
@@ -246,6 +272,31 @@ class SelectionServiceTests(TestCase):
         SelectionService.deselect(self.project, second_selection, self.user)
         first_selection.refresh_from_db()
         self.assertEqual(first_selection.order, 1)
+        self.assertEqual(AnalysisSegmentReview.objects.count(), 4)
+        self.assertEqual(
+            AnalysisSegmentReview.objects.filter(decision="selected").count(), 3
+        )
+        self.assertEqual(
+            AnalysisSegmentReview.objects.filter(decision="removed").count(), 1
+        )
+
+    def test_exclusion_records_reason_and_retires_an_active_selection(self):
+        selection, _ = SelectionService.select(self.project, self.first, self.user)
+        review = SelectionService.exclude(
+            self.project, self.first, self.user, "Repeats the stronger opening point."
+        )
+        selection.refresh_from_db()
+        self.assertIsNotNone(selection.retired_at)
+        self.assertEqual(review.decision, AnalysisSegmentReview.Decision.EXCLUDED)
+        self.assertEqual(review.reason, "Repeats the stronger opening point.")
+        self.assertEqual(
+            list(
+                AnalysisSegmentReview.objects.filter(analysis_segment=self.first).values_list(
+                    "decision", flat=True
+                )
+            ),
+            ["excluded", "removed", "selected"],
+        )
 
     def test_permission_lifecycle_stale_and_cross_run_guards(self):
         other = get_user_model().objects.create_user(username="selection-other")

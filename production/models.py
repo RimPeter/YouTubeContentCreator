@@ -170,6 +170,29 @@ class MediaAsset(models.Model):
             raise ValidationError(errors)
 
 
+class NarrationTake(models.Model):
+    project = models.ForeignKey("scraper.VideoProject", on_delete=models.CASCADE)
+    reaction = models.ForeignKey("editorial.ReactionBlock", on_delete=models.PROTECT, related_name="narration_takes")
+    media_asset = models.OneToOneField(MediaAsset, on_delete=models.PROTECT, related_name="narration_take")
+    version = models.PositiveIntegerField()
+    script_text = models.TextField()
+    script_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["reaction", "version"], name="narration_reaction_version_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="narration_version_gte_1"),
+        ]
+
+    def clean(self):
+        if self.reaction.project_id != self.project_id or self.media_asset.project_id != self.project_id:
+            raise ValidationError("Narration, script and media must belong to the same project.")
+        if self.media_asset.kind != MediaAsset.Kind.NARRATION:
+            raise ValidationError("A narration take requires narration media.")
+
+
 class PipelineJob(models.Model):
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"

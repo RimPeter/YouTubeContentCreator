@@ -1,0 +1,65 @@
+{% extends "scraper/base.html" %}
+{% block title %}Reaction Timeline v{{ timeline.version }}{% endblock %}
+{% block content %}
+<h1>Reaction Timeline v{{ timeline.version }}</h1>
+<p><a href="{% url 'editorial:recording_review' timeline.pk %}">Review script, record narration and prepare handoff</a></p>
+<p><a href="{% url 'editorial:reaction_sequence_draft_detail' timeline.reaction_draft_id %}">Back to continuous reaction draft</a></p>
+<p>{{ timeline.get_status_display }}{% if is_stale %} · source plan or draft has changed; create a new timeline before using it.{% endif %}</p>
+<nav class="card" aria-label="Reaction Timeline views">
+  <a href="{% url 'editorial:reaction_timeline_detail' timeline.pk %}?view=timeline"{% if view == "timeline" %} aria-current="page"{% endif %}>Timeline</a>
+  <a href="{% url 'editorial:reaction_timeline_detail' timeline.pk %}?view=source"{% if view == "source" %} aria-current="page"{% endif %}>Source transcript</a>
+  <a href="{% url 'editorial:reaction_timeline_detail' timeline.pk %}?view=creator"{% if view == "creator" %} aria-current="page"{% endif %}>Creator transcript</a>
+</nav>
+{% if view == "timeline" %}<section class="card"><h2>Production readiness</h2>
+{% if readiness_issues %}<ul>{% for issue in readiness_issues %}<li>{{ issue }}</li>{% endfor %}</ul>
+{% else %}<p>Every included turn has its required media. You can create a production assembly.</p>
+<form method="post" action="{% url 'editorial:create_reaction_assembly' timeline.pk %}">{% csrf_token %}<button type="submit">Create production assembly</button></form>{% endif %}
+</section>{% endif %}
+{% if not is_stale %}<section class="card">
+  <h2>Add a creator turn</h2>
+  <form method="post" action="{% url 'editorial:add_timeline_creator_item' timeline.pk %}">{% csrf_token %}
+    <label>Label <input name="label" maxlength="255" required></label>
+    <label>What you say <textarea name="transcript_text" rows="4" maxlength="8000" required></textarea></label>
+    <button type="submit">Add creator turn</button>
+  </form>
+</section>{% endif %}
+{% for item in items %}
+<section class="card">
+  <h2>#{{ item.order }} · {{ item.get_item_type_display }}{% if item.label %}: {{ item.label }}{% endif %}</h2>
+  {% if not item.included %}<p class="muted">Excluded from this timeline.</p>{% endif %}
+  {% if item.item_type == "source" and item.source_start_seconds is not None %}
+  <p class="muted">Saved source transcript · {{ item.source_start_seconds|floatformat:1 }}s{% if item.source_end_seconds is not None %}–{{ item.source_end_seconds|floatformat:1 }}s{% endif %}</p>
+  {% if not is_stale %}<form method="post" action="{% url 'editorial:edit_timeline_source_item' item.pk %}">{% csrf_token %}
+    <label>In <input type="number" name="source_start_seconds" min="0" step="0.1" value="{{ item.source_start_seconds }}"></label>
+    <label>Out <input type="number" name="source_end_seconds" min="0" step="0.1" value="{{ item.source_end_seconds }}"></label>
+    <label><input type="checkbox" name="included"{% if item.included %} checked{% endif %}> Include</label>
+    <button type="submit">Save trim</button>
+  </form>{% endif %}
+  {% else %}
+  {% if not is_stale %}<form method="post" action="{% url 'editorial:edit_timeline_creator_item' item.pk %}">{% csrf_token %}
+    <label>Label <input name="label" maxlength="255" value="{{ item.label }}"></label>
+    <label>What you say <textarea name="transcript_text" rows="5" maxlength="8000">{{ item.transcript_text }}</textarea></label>
+    <label><input type="checkbox" name="included"{% if item.included %} checked{% endif %}> Include</label>
+    <button type="submit">Save creator turn</button>
+  </form>{% endif %}
+  {% endif %}
+  {% if item.item_type == "creator" and item.included and not is_stale %}<details><summary>Record this creator turn</summary>
+    <p><a href="{% url 'editorial:recording_review' timeline.pk %}">Review the script, listen to takes and select a recording</a></p>
+    <form method="post" enctype="multipart/form-data" action="{% url 'editorial:upload_timeline_narration' item.pk %}">{% csrf_token %}
+      {{ narration_form.media_file.label_tag }} {{ narration_form.media_file }}
+      <label>Rights basis {{ narration_form.rights_basis }}</label>
+      <label>Rights notes {{ narration_form.rights_notes }}</label>
+      <label>{{ narration_form.rights_confirmed }} {{ narration_form.rights_confirmed.label }}</label>
+      <button type="submit">Upload narration</button>
+    </form>
+    {% for take in item.narration_takes.all %}<p>Take v{{ take.version }}{% if take.approved_at %} · approved{% else %}
+      <form method="post" action="{% url 'editorial:approve_timeline_narration' take.pk %}">{% csrf_token %}<button type="submit">Approve take</button></form>{% endif %}</p>{% empty %}<p>No narration take uploaded.</p>{% endfor %}
+  </details>{% endif %}
+  <p>{{ item.transcript_text|linebreaksbr }}</p>
+  {% if not is_stale %}<form method="post" action="{% url 'editorial:move_timeline_item' item.pk %}">{% csrf_token %}
+    <button name="direction" value="up" type="submit">Move up</button>
+    <button name="direction" value="down" type="submit">Move down</button>
+  </form>{% endif %}
+</section>
+{% empty %}<p>No transcript turns were recorded.</p>{% endfor %}
+{% endblock %}

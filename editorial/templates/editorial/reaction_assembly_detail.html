@@ -1,0 +1,18 @@
+{% extends "scraper/base.html" %}
+{% block title %}Production assembly v{{ assembly.version }}{% endblock %}
+{% block content %}
+<h1>Production assembly v{{ assembly.version }}</h1>
+<p><a href="{% url 'editorial:assembly_script_download' assembly.pk %}">Download saved assembly script</a></p>
+<p>Total runtime: {{ total_duration|floatformat:1 }}s</p>
+<p><a href="{% url 'editorial:recording_review' assembly.timeline_id %}">Recording review and assembly history</a></p>
+<p><a href="{% url 'editorial:reaction_timeline_detail' assembly.timeline_id %}">Back to Reaction Timeline</a></p>
+<p>{{ assembly.get_status_display }}{% if is_stale %} · inputs changed; create a new assembly before production.{% endif %}</p>
+{% for item in items %}<section class="card"><h2>#{{ item.order }} · {{ item.snapshot.type }}: {{ item.snapshot.label }}</h2>
+<p>{{ item.snapshot.duration|floatformat:1 }}s · Media in: {{ item.snapshot.media_in|floatformat:1 }}s</p>
+{% if item.narration_take_id %}<audio controls preload="none" src="{% url 'editorial:timeline_take_media' item.narration_take_id %}"></audio>{% endif %}
+{% if item.source_clip_id %}<a href="{% url 'production:clip_detail' item.source_clip_id %}">Inspect source clip</a>{% endif %}
+<p>{{ item.transcript_text|linebreaksbr }}</p>
+{% if item.source_clip %}<p>Source clip #{{ item.source_clip_id }} · {{ item.source_start_seconds|floatformat:1 }}s–{{ item.source_end_seconds|floatformat:1 }}s</p>{% endif %}
+{% if item.narration_take %}<p>Narration take v{{ item.narration_take.version }}</p>{% endif %}
+</section>{% endfor %}
+{% endblock %}

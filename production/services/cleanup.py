@@ -5,7 +5,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from production.models import ArtifactDependency, MediaAsset, SourceClip
+from production.models import ArtifactDependency, MediaAsset, SourceClip, NarrationTake
 from scraper.models import VideoProject
 from scraper.services import lock_project
 
@@ -27,8 +27,12 @@ class MediaCleanupService:
 
     @staticmethod
     def _referenced(asset):
+        from editorial.models import TimelineNarrationTake
         media_type = ContentType.objects.get_for_model(MediaAsset)
         return (
+            NarrationTake.objects.filter(media_asset=asset).exists()
+            or TimelineNarrationTake.objects.filter(media_asset=asset).exists()
+            or
             ArtifactDependency.objects.filter(
                 Q(upstream_content_type=media_type, upstream_object_id=asset.pk)
                 | Q(downstream_content_type=media_type, downstream_object_id=asset.pk)

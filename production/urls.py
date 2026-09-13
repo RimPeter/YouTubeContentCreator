@@ -31,4 +31,5 @@ urlpatterns = [
         views.stream_source_clip,
         name="stream_source_clip",
     ),
+    path("narrations/<int:take_pk>/media/", views.stream_narration, name="stream_narration"),
 ]

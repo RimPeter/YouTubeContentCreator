@@ -4,7 +4,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from analysis.models import AnalysisRun, AnalysisSegment, SegmentSelection
+from analysis.models import AnalysisRun, AnalysisSegment, AnalysisSegmentReview, SegmentSelection
 from scraper.models import VideoProject
 from scraper.services import lock_project
 
@@ -28,6 +28,16 @@ class SelectionValidationError(SelectionServiceError):
 
 
 class SelectionService:
+    @staticmethod
+    def _record_review(project, segment, decision, user, reason=""):
+        return AnalysisSegmentReview.objects.create(
+            project=project,
+            analysis_segment=segment,
+            decision=decision,
+            reason=reason.strip(),
+            reviewed_by=user,
+        )
+
     @staticmethod
     def _current_project(project):
         try:
@@ -120,6 +130,9 @@ class SelectionService:
                 from production.services.clips import SourceClipService
 
                 SourceClipService.invalidate_selection_outputs(existing, user)
+                cls._record_review(
+                    project, segment, AnalysisSegmentReview.Decision.SELECTED, user
+                )
                 return existing, False
             next_order = (
                 SegmentSelection.objects.active().filter(project=project).aggregate(latest=Max("order"))[
@@ -135,6 +148,9 @@ class SelectionService:
                 reviewed_end_seconds=reviewed_end,
                 notes=notes,
                 selected_by=user,
+            )
+            cls._record_review(
+                project, segment, AnalysisSegmentReview.Decision.SELECTED, user
             )
             return selection, True
 
@@ -154,6 +170,12 @@ class SelectionService:
             from production.services.clips import SourceClipService
 
             SourceClipService.invalidate_selection_outputs(selection, user)
+            cls._record_review(
+                project,
+                selection.analysis_segment,
+                AnalysisSegmentReview.Decision.REMOVED,
+                user,
+            )
             later = list(
                 SegmentSelection.objects.active().filter(project=project, order__gt=removed_order).order_by(
                     "order"
@@ -162,6 +184,33 @@ class SelectionService:
             for item in later:
                 item.order -= 1
                 item.save(update_fields=["order", "updated_at"])
+
+    @classmethod
+    def exclude(cls, project, segment, user, reason=""):
+        with transaction.atomic():
+            project = cls._current_project(project)
+            cls.ensure_selection_allowed(project, user)
+            segment = AnalysisSegment.objects.select_related(
+                "analysis_run__source_video__project"
+            ).get(pk=segment.pk)
+            if segment.analysis_run.source_video.project_id != project.pk:
+                raise SelectionValidationError("The segment does not belong to this project.")
+            if segment.analysis_run.status != AnalysisRun.Status.SUCCEEDED:
+                raise SelectionValidationError("Only successful analysis segments may be reviewed.")
+            if AnalysisService.is_stale(segment.analysis_run):
+                raise SelectionValidationError("This analysis is stale and must be rerun.")
+            active = SegmentSelection.objects.active().filter(
+                project=project, analysis_segment=segment
+            ).first()
+            if active:
+                cls.deselect(project, active, user)
+            return cls._record_review(
+                project,
+                segment,
+                AnalysisSegmentReview.Decision.EXCLUDED,
+                user,
+                reason,
+            )
 
     @classmethod
     def reorder(cls, project, ordered_selection_ids, user):

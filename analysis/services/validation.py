@@ -13,6 +13,18 @@ SCORE_DIMENSIONS = (
     "clip_suitability",
 )
 
+EDITORIAL_APPROACHES = (
+    "review",
+    "critic",
+    "reflect",
+    "add_on",
+    "explain",
+    "verify",
+    "compare",
+    "question",
+    "pass",
+)
+
 DEFAULT_SCORE_WEIGHTS = {
     "relevance": 0.20,
     "clarity": 0.15,
@@ -48,6 +60,7 @@ class ValidatedSegment:
     component_scores: dict
     aggregate_score: Decimal
     rationale: str
+    editorial_recommendation: dict
 
 
 def normalize_configuration(configuration=None):
@@ -114,6 +127,48 @@ def _validate_scores(scores, weights):
     return normalized, aggregate.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
 
+def _validate_editorial_recommendation(recommendation):
+    required = {
+        "primary_approach",
+        "secondary_approaches",
+        "confidence",
+        "reasoning",
+        "suggested_angle",
+        "research_needed",
+    }
+    if not isinstance(recommendation, dict) or set(recommendation) != required:
+        raise AnalysisOutputValidationError(
+            "Every segment must provide a complete editorial recommendation."
+        )
+    primary = recommendation["primary_approach"]
+    secondary = recommendation["secondary_approaches"]
+    confidence = recommendation["confidence"]
+    if primary not in EDITORIAL_APPROACHES:
+        raise AnalysisOutputValidationError("Editorial recommendation uses an unsupported primary approach.")
+    if (
+        not isinstance(secondary, list)
+        or len(secondary) > 2
+        or len(secondary) != len(set(secondary))
+        or primary in secondary
+        or any(item not in EDITORIAL_APPROACHES for item in secondary)
+    ):
+        raise AnalysisOutputValidationError("Secondary editorial approaches are invalid.")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise AnalysisOutputValidationError("Editorial recommendation confidence must be numeric.")
+    if not math.isfinite(confidence) or not 0 <= confidence <= 100:
+        raise AnalysisOutputValidationError("Editorial recommendation confidence must be between 0 and 100.")
+    if not isinstance(recommendation["research_needed"], bool):
+        raise AnalysisOutputValidationError("Editorial recommendation research_needed must be boolean.")
+    return {
+        "primary_approach": primary,
+        "secondary_approaches": secondary,
+        "confidence": float(confidence),
+        "reasoning": _required_text(recommendation, "reasoning", 2000),
+        "suggested_angle": _required_text(recommendation, "suggested_angle", 2000),
+        "research_needed": recommendation["research_needed"],
+    }
+
+
 def validate_provider_output(output, chunks, weights):
     nonempty_chunks = [chunk for chunk in chunks if chunk.text.strip()]
     if not nonempty_chunks:
@@ -156,6 +211,9 @@ def validate_provider_output(output, chunks, weights):
         ):
             raise AnalysisOutputValidationError("topic_labels must contain up to 20 short strings.")
         normalized_scores, aggregate = _validate_scores(item.get("scores"), weights)
+        editorial_recommendation = _validate_editorial_recommendation(
+            item.get("editorial_recommendation")
+        )
         start_chunk = segment_chunks[0]
         end_chunk = segment_chunks[-1]
         validated.append(
@@ -172,6 +230,7 @@ def validate_provider_output(output, chunks, weights):
                 component_scores=normalized_scores,
                 aggregate_score=aggregate,
                 rationale=_required_text(item, "rationale", 4000),
+                editorial_recommendation=editorial_recommendation,
             )
         )
         expected_start_index = end_index + 1
@@ -198,6 +257,14 @@ def build_fallback_output(chunks, max_chunks):
                 "topic_labels": ["deterministic-fallback"],
                 "scores": {name: 50.0 for name in SCORE_DIMENSIONS},
                 "rationale": "Deterministic fallback segment; human editorial review is required.",
+                "editorial_recommendation": {
+                    "primary_approach": "add_on",
+                    "secondary_approaches": [],
+                    "confidence": 0,
+                    "reasoning": "This fallback section was grouped by transcript position, not topic analysis.",
+                    "suggested_angle": "Review the section and add context before using it in a clip.",
+                    "research_needed": False,
+                },
             }
         )
     return {"segments": segments}

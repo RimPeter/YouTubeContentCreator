@@ -114,6 +114,249 @@ class ResearchPackage(models.Model):
             raise ValidationError(errors)
 
 
+class ReactionSequencePlan(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        READY = "ready", "Ready for drafting"
+        STALE = "stale", "Stale"
+        SUPERSEDED = "superseded", "Superseded"
+
+    project = models.ForeignKey(
+        "scraper.VideoProject", on_delete=models.CASCADE, related_name="reaction_sequence_plans"
+    )
+    version = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    input_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
+    overall_thesis = models.TextField(validators=[MaxLengthValidator(2000)])
+    audience_angle = models.TextField(validators=[MaxLengthValidator(2000)])
+    planned_conclusion = models.TextField(validators=[MaxLengthValidator(2000)])
+    review_attestation = models.JSONField(default=dict, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name="reaction_sequence_plans_reviewed")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+        related_name="reaction_sequence_plans_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["project", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["project", "version"], name="reaction_plan_project_version_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="reaction_plan_version_gte_1"),
+        ]
+
+    def __str__(self):
+        return f"{self.project} reaction plan v{self.version}"
+
+
+class ReactionSequenceDraft(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        FAILED = "failed", "Failed"
+        STALE = "stale", "Stale"
+        SUPERSEDED = "superseded", "Superseded"
+
+    project = models.ForeignKey("scraper.VideoProject", on_delete=models.CASCADE, related_name="reaction_sequence_drafts")
+    plan = models.ForeignKey(ReactionSequencePlan, on_delete=models.PROTECT, related_name="reaction_drafts")
+    version = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    input_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
+    opening = models.TextField(validators=[MaxLengthValidator(4000)])
+    conclusion = models.TextField(validators=[MaxLengthValidator(4000)])
+    combined_script = models.TextField(validators=[MaxLengthValidator(40000)])
+    rationale = models.TextField(validators=[MaxLengthValidator(4000)])
+    provider = models.CharField(max_length=100, blank=True)
+    provider_model = models.CharField(max_length=100, blank=True)
+    prompt_version = models.CharField(max_length=64, blank=True)
+    used_fallback = models.BooleanField(default=False)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+                                   related_name="reaction_sequence_drafts_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "version"], name="reaction_sequence_draft_version_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="reaction_sequence_draft_version_gte_1"),
+        ]
+
+
+class ReactionSequenceDraftSection(models.Model):
+    draft = models.ForeignKey(ReactionSequenceDraft, on_delete=models.CASCADE, related_name="sections")
+    plan_section = models.ForeignKey("ReactionSequenceSection", on_delete=models.PROTECT, related_name="draft_sections")
+    order = models.PositiveIntegerField()
+    reaction_text = models.TextField(validators=[MaxLengthValidator(8000)])
+    bridge = models.TextField(blank=True, validators=[MaxLengthValidator(2000)])
+
+    class Meta:
+        ordering = ["draft", "order"]
+        constraints = [
+            models.UniqueConstraint(fields=["draft", "order"], name="reaction_sequence_draft_section_order_uniq"),
+            models.UniqueConstraint(fields=["draft", "plan_section"], name="reaction_sequence_draft_plan_section_uniq"),
+            models.CheckConstraint(condition=models.Q(order__gte=1), name="reaction_sequence_draft_section_order_gte_1"),
+        ]
+
+
+class ReactionTimeline(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        RECORDING = "recording", "Ready for recording"
+        READY = "ready", "Recording complete"
+        STALE = "stale", "Stale"
+
+    project = models.ForeignKey("scraper.VideoProject", on_delete=models.CASCADE, related_name="reaction_timelines")
+    reaction_draft = models.ForeignKey(ReactionSequenceDraft, on_delete=models.PROTECT, related_name="timelines")
+    reviewed_fingerprint = models.CharField(max_length=64, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="recording_reviews")
+    version = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    input_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+                                   related_name="reaction_timelines_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["reaction_draft", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["reaction_draft", "version"], name="reaction_timeline_draft_version_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="reaction_timeline_version_gte_1"),
+        ]
+
+
+class ReactionTimelineItem(models.Model):
+    class ItemType(models.TextChoices):
+        SOURCE = "source", "Source"
+        CREATOR = "creator", "Creator"
+
+    timeline = models.ForeignKey(ReactionTimeline, on_delete=models.CASCADE, related_name="items")
+    order = models.PositiveIntegerField()
+    item_type = models.CharField(max_length=12, choices=ItemType.choices)
+    plan_section = models.ForeignKey("ReactionSequenceSection", on_delete=models.PROTECT, null=True, blank=True,
+                                     related_name="timeline_items")
+    draft_section = models.ForeignKey(ReactionSequenceDraftSection, on_delete=models.PROTECT, null=True, blank=True,
+                                      related_name="timeline_items")
+    label = models.CharField(max_length=255)
+    transcript_text = models.TextField()
+    included = models.BooleanField(default=True)
+    source_start_seconds = models.FloatField(null=True, blank=True)
+    source_end_seconds = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["timeline", "order"]
+        constraints = [
+            models.UniqueConstraint(fields=["timeline", "order"], name="reaction_timeline_item_order_uniq"),
+            models.CheckConstraint(condition=models.Q(order__gte=1), name="reaction_timeline_item_order_gte_1"),
+            models.CheckConstraint(condition=models.Q(source_end_seconds__isnull=True) | models.Q(source_end_seconds__gte=models.F("source_start_seconds")), name="reaction_timeline_time_order"),
+        ]
+
+
+class TimelineNarrationTake(models.Model):
+    recording_notes = models.TextField(blank=True)
+    selected = models.BooleanField(default=False)
+    timeline_item = models.ForeignKey(ReactionTimelineItem, on_delete=models.PROTECT, related_name="narration_takes")
+    media_asset = models.OneToOneField("production.MediaAsset", on_delete=models.PROTECT, related_name="timeline_narration_take")
+    version = models.PositiveIntegerField()
+    script_text = models.TextField()
+    script_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name="timeline_narration_takes_approved")
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+                                   related_name="timeline_narration_takes_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["timeline_item", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["timeline_item", "version"], name="timeline_narration_item_version_uniq"),
+            models.UniqueConstraint(fields=["timeline_item"], condition=models.Q(selected=True), name="one_selected_timeline_take"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="timeline_narration_version_gte_1"),
+        ]
+
+
+class ReactionProductionAssembly(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        READY = "ready", "Ready for production"
+        STALE = "stale", "Stale"
+
+    timeline = models.ForeignKey(ReactionTimeline, on_delete=models.PROTECT, related_name="production_assemblies")
+    version = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    input_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+                                   related_name="reaction_production_assemblies_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["timeline", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["timeline", "version"], name="reaction_assembly_timeline_version_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="reaction_assembly_version_gte_1"),
+        ]
+
+
+class ReactionProductionAssemblyItem(models.Model):
+    snapshot = models.JSONField(default=dict)
+    assembly = models.ForeignKey(ReactionProductionAssembly, on_delete=models.CASCADE, related_name="items")
+    order = models.PositiveIntegerField()
+    timeline_item = models.ForeignKey(ReactionTimelineItem, on_delete=models.PROTECT, related_name="assembly_items")
+    narration_take = models.ForeignKey(TimelineNarrationTake, on_delete=models.PROTECT, null=True, blank=True,
+                                      related_name="assembly_items")
+    source_clip = models.ForeignKey("production.SourceClip", on_delete=models.PROTECT, null=True, blank=True,
+                                    related_name="reaction_assembly_items")
+    transcript_text = models.TextField()
+    source_start_seconds = models.FloatField(null=True, blank=True)
+    source_end_seconds = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["assembly", "order"]
+        constraints = [
+            models.UniqueConstraint(fields=["assembly", "order"], name="reaction_assembly_item_order_uniq"),
+            models.CheckConstraint(condition=models.Q(order__gte=1), name="reaction_assembly_item_order_gte_1"),
+        ]
+
+
+class ReactionSequenceSection(models.Model):
+    class Role(models.TextChoices):
+        THESIS = "thesis", "Thesis"
+        EVIDENCE = "evidence", "Evidence"
+        TENSION = "tension", "Tension"
+        REFLECTION = "reflection", "Reflection"
+        ADD_ON = "add_on", "Practical add-on"
+        CONCLUSION = "conclusion", "Conclusion"
+
+    plan = models.ForeignKey(ReactionSequencePlan, on_delete=models.CASCADE, related_name="sections")
+    selection = models.ForeignKey(
+        "analysis.SegmentSelection", on_delete=models.PROTECT, related_name="reaction_sequence_sections"
+    )
+    order = models.PositiveIntegerField()
+    role = models.CharField(max_length=16, choices=Role.choices)
+    source_title = models.CharField(max_length=255)
+    transcript_snapshot = models.TextField()
+    recommendation_snapshot = models.JSONField(default=dict)
+    bridge = models.TextField(blank=True, validators=[MaxLengthValidator(2000)])
+    research_required = models.BooleanField(default=False)
+    research_reason = models.TextField(blank=True, validators=[MaxLengthValidator(2000)])
+
+    class Meta:
+        ordering = ["plan", "order"]
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "order"], name="reaction_plan_section_order_uniq"),
+            models.UniqueConstraint(fields=["plan", "selection"], name="reaction_plan_section_selection_uniq"),
+            models.CheckConstraint(condition=models.Q(order__gte=1), name="reaction_plan_section_order_gte_1"),
+        ]
+
+    def __str__(self):
+        return f"{self.plan} section {self.order}: {self.source_title}"
+
+
 class EvidenceSource(models.Model):
     class Classification(models.TextChoices):
         SUPPORTS = "supports", "Supports"

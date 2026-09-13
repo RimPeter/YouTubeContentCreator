@@ -15,7 +15,7 @@ from .validation import (
 )
 
 
-ALGORITHM_VERSION = "analysis-v1"
+ALGORITHM_VERSION = "topic-segmentation-v1"
 
 
 class AnalysisServiceError(Exception):
@@ -190,6 +190,7 @@ class AnalysisService:
                             component_scores=segment.component_scores,
                             aggregate_score=segment.aggregate_score,
                             rationale=segment.rationale,
+                            editorial_recommendation=segment.editorial_recommendation,
                         )
                         for segment in validated_segments
                     ]

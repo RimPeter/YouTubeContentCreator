@@ -27,6 +27,14 @@ class SourceMediaUploadForm(forms.Form):
     )
 
 
+class NarrationUploadForm(SourceMediaUploadForm):
+    media_file = forms.FileField(
+        label="Narration recording",
+        help_text="WAV, MP3, M4A or AAC. Audio only, up to 1 hour. Record the approved script below.",
+        widget=forms.ClearableFileInput(attrs={"accept": ".wav,.mp3,.m4a,.aac"}),
+    )
+
+
 class SourceClipCreationForm(forms.Form):
     source_asset = forms.ModelChoiceField(queryset=MediaAsset.objects.none())
     padding_before_seconds = forms.DecimalField(

@@ -6,7 +6,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
-from analysis.models import AnalysisRun, AnalysisSegment, SegmentSelection
+from analysis.models import AnalysisRun, AnalysisSegment, AnalysisSegmentReview, SegmentSelection
 from scraper.models import SourceVideo, TranscriptChunk, VideoProject
 
 from .helpers import create_approved_source, scores
@@ -124,3 +124,19 @@ class AnalysisModelTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             selection.full_clean()
+
+    def test_review_validation_rejects_a_segment_from_another_project(self):
+        other_user = get_user_model().objects.create_user(username="review-other-user")
+        other_project = VideoProject.objects.create(
+            owner=other_user,
+            title="Other review project",
+            status=VideoProject.Status.APPROVED,
+            approved_at=timezone.now(),
+        )
+        review = AnalysisSegmentReview(
+            project=other_project,
+            analysis_segment=self.segment,
+            decision=AnalysisSegmentReview.Decision.EXCLUDED,
+        )
+        with self.assertRaises(ValidationError):
+            review.full_clean()

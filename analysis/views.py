@@ -1,12 +1,14 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from scraper.models import SourceVideo, VideoProject
 
-from .forms import AnalysisConfigurationForm, SegmentSelectionForm
-from .models import AnalysisRun, AnalysisSegment, SegmentSelection
+from .forms import AnalysisConfigurationForm, SegmentExclusionForm, SegmentSelectionForm
+from .models import AnalysisRun, AnalysisSegment, AnalysisSegmentReview, SegmentSelection
+from .services.providers import OpenAITranscriptAnalysisProvider
 from .services import (
     AnalysisService,
     AnalysisServiceError,
@@ -69,7 +71,7 @@ def project_dashboard(request, project_pk):
     ).order_by("order")
     return render(
         request,
-        "analysis/project_dashboard.html",
+        "analysis/project_dashboard_improved.html",
         {
             "project": project,
             "sources": sources,
@@ -88,7 +90,8 @@ def run_analysis(request, source_pk):
         messages.error(request, "Analysis configuration is invalid.")
         return redirect("analysis:project_dashboard", project_pk=source_video.project_id)
     try:
-        run = AnalysisService().analyze(
+        provider = OpenAITranscriptAnalysisProvider() if settings.OPENAI_API_KEY else None
+        run = AnalysisService(provider).analyze(
             source_video,
             request.user,
             configuration=form.cleaned_data,
@@ -120,6 +123,12 @@ def run_detail(request, run_pk):
             analysis_segment__analysis_run=run,
         )
     }
+    latest_reviews = {}
+    for review in AnalysisSegmentReview.objects.filter(
+        project=run.source_video.project,
+        analysis_segment__analysis_run=run,
+    ).select_related("reviewed_by"):
+        latest_reviews.setdefault(review.analysis_segment_id, review)
     segment_rows = []
     for segment in segments:
         selection = selected.get(segment.pk)
@@ -134,12 +143,15 @@ def run_detail(request, run_pk):
             {
                 "segment": segment,
                 "selection": selection,
+                "review": latest_reviews.get(segment.pk),
                 "form": SegmentSelectionForm(initial=initial),
+                "exclusion_form": SegmentExclusionForm(),
+                "duration_seconds": segment.end_seconds - segment.start_seconds,
             }
         )
     return render(
         request,
-        "analysis/run_detail.html",
+        "analysis/run_detail_improved.html",
         {
             "run": run,
             "segment_rows": segment_rows,
@@ -186,6 +198,28 @@ def deselect_segment(request, selection_pk):
     else:
         messages.success(request, "Segment deselected.")
     return redirect("analysis:run_detail", run_pk=run_pk)
+
+
+@login_required
+@require_POST
+def exclude_segment(request, segment_pk):
+    segment = get_object_or_404(segment_queryset_for(request.user), pk=segment_pk)
+    form = SegmentExclusionForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Exclusion reason is invalid.")
+        return redirect("analysis:run_detail", run_pk=segment.analysis_run_id)
+    try:
+        SelectionService.exclude(
+            segment.analysis_run.source_video.project,
+            segment,
+            request.user,
+            form.cleaned_data["reason"],
+        )
+    except SelectionServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Segment excluded from editorial consideration.")
+    return redirect("analysis:run_detail", run_pk=segment.analysis_run_id)
 
 
 @login_required

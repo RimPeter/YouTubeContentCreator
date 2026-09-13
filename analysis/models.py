@@ -83,6 +83,7 @@ class AnalysisSegment(models.Model):
     component_scores = models.JSONField(default=dict)
     aggregate_score = models.DecimalField(max_digits=6, decimal_places=3)
     rationale = models.TextField()
+    editorial_recommendation = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -128,6 +129,57 @@ class AnalysisSegment(models.Model):
                 errors["start_chunk"] = "Segment chunks must belong to the analysis source video."
         if errors:
             raise ValidationError(errors)
+
+
+class AnalysisSegmentReview(models.Model):
+    """An append-only editorial decision about an AI-suggested segment."""
+
+    class Decision(models.TextChoices):
+        SELECTED = "selected", "Selected"
+        EXCLUDED = "excluded", "Excluded"
+        REMOVED = "removed", "Removed from selection"
+
+    project = models.ForeignKey(
+        "scraper.VideoProject",
+        on_delete=models.CASCADE,
+        related_name="analysis_segment_reviews",
+    )
+    analysis_segment = models.ForeignKey(
+        AnalysisSegment,
+        on_delete=models.CASCADE,
+        related_name="reviews",
+    )
+    decision = models.CharField(max_length=12, choices=Decision.choices)
+    reason = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="analysis_segment_reviews_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["analysis_segment", "-created_at", "-pk"]
+        indexes = [
+            models.Index(
+                fields=["project", "analysis_segment", "-created_at"],
+                name="analysis_review_lookup_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.analysis_segment} — {self.get_decision_display()}"
+
+    def clean(self):
+        if (
+            self.analysis_segment_id
+            and self.project_id
+            and self.analysis_segment.analysis_run.source_video.project_id != self.project_id
+        ):
+            raise ValidationError(
+                {"analysis_segment": "The segment must belong to this project."}
+            )
 
 
 class SegmentSelectionQuerySet(models.QuerySet):

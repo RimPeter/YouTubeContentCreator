@@ -4,6 +4,7 @@ from django.utils.html import escape
 
 from editorial.services.research import ResearchService
 from editorial.services.reactions import ReactionService
+from editorial.models import ReactionSequencePlan
 
 from .helpers import EditorialTestCase, create_approved_clip
 
@@ -48,6 +49,17 @@ class EditorialViewTests(EditorialTestCase):
             "research_question": "Question", "editorial_focus": "Focus"
         })
         self.assertEqual(response.status_code, 403)
+
+    def test_creates_and_reviews_a_continuous_reaction_plan(self):
+        response = self.client.post(
+            reverse("editorial:create_reaction_plan", args=[self.project.pk])
+        )
+        plan = ReactionSequencePlan.objects.get()
+        self.assertRedirects(response, reverse("editorial:reaction_plan_detail", args=[plan.pk]))
+        detail = self.client.get(response.url)
+        self.assertContains(detail, "Continuous reaction plan")
+        self.assertContains(detail, "Ordered reaction sections")
+        self.assertEqual(plan.sections.count(), 1)
 
     def test_reaction_subsections_can_be_edited_and_recombined(self):
         package = ResearchService.create_package(

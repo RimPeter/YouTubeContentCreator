@@ -1,0 +1,12 @@
+{% extends "scraper/base.html" %}
+{% block title %}Continuous reaction draft v{{ draft.version }}{% endblock %}
+{% block content %}
+<h1>Continuous reaction draft v{{ draft.version }}</h1>
+<p><a href="{% url 'editorial:reaction_plan_detail' draft.plan_id %}">Back to reaction plan</a></p>
+<form method="post" action="{% url 'editorial:create_reaction_timeline' draft.pk %}">{% csrf_token %}<button type="submit">Create Reaction Timeline</button></form>
+<p>{{ draft.get_status_display }}{% if draft.used_fallback %} · deterministic fallback{% endif %}</p>
+<section class="card"><h2>Opening</h2><p>{{ draft.opening }}</p></section>
+{% for section in sections %}<section class="card"><h2>#{{ section.order }} {{ section.plan_section.source_title }}</h2><p>{{ section.reaction_text }}</p>{% if section.bridge %}<p><strong>Bridge:</strong> {{ section.bridge }}</p>{% endif %}<details><summary>Source segment</summary><p>{{ section.plan_section.transcript_snapshot }}</p></details></section>{% endfor %}
+<section class="card"><h2>Conclusion</h2><p>{{ draft.conclusion }}</p></section>
+<section class="card"><h2>Complete spoken draft</h2><p>{{ draft.combined_script|linebreaksbr }}</p><p class="muted">{{ draft.rationale }}</p></section>
+{% endblock %}

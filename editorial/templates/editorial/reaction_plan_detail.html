@@ -1,0 +1,37 @@
+{% extends "scraper/base.html" %}
+{% block title %}Reaction plan v{{ plan.version }} · {{ plan.project.title }}{% endblock %}
+{% block content %}
+<h1>Continuous reaction plan v{{ plan.version }}</h1>
+<p><a href="{% url 'project_detail' plan.project_id %}">{{ plan.project.title }}</a></p>
+<p>{{ plan.get_status_display }}{% if is_stale %} · stale{% endif %}</p>
+{% if is_stale %}<div class="card">Selected segments changed. This plan is historical; create a new plan from the current order.</div>{% endif %}
+
+<section class="card">
+    <h2>Overall direction</h2>
+    <form method="post" action="{% url 'editorial:edit_reaction_plan' plan.pk %}">
+        {% csrf_token %}{{ plan_form.as_p }}{% if not is_stale and plan.status == "draft" %}<button>Save plan direction</button>{% endif %}
+    </form>
+</section>
+{% if not is_stale and plan.status == "draft" %}
+<section class="card"><h2>Ready for drafting</h2><form method="post" action="{% url 'editorial:ready_reaction_plan' plan.pk %}">{% csrf_token %}<label><input type="checkbox" name="research_reviewed"> I reviewed the research requirements flagged below.</label><button>Mark plan ready</button></form></section>
+{% elif not is_stale and plan.status == "ready" %}
+<section class="card"><h2>Generate continuous reaction</h2><form method="post" action="{% url 'editorial:generate_reaction_sequence_draft' plan.pk %}">{% csrf_token %}<button>Generate AI reaction draft</button></form><form method="post" action="{% url 'editorial:generate_reaction_sequence_draft' plan.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="basic"><button>Create basic continuous draft</button></form></section>
+{% endif %}
+
+<section>
+    <h2>Ordered reaction sections</h2>
+    {% for row in section_rows %}{% with section=row.section %}
+    <article class="card">
+        <h3>#{{ section.order }} {{ section.source_title }} · {{ section.get_role_display }}</h3>
+        <p><strong>Recommended approach:</strong> {{ section.recommendation_snapshot.primary_approach|title }}{% if section.recommendation_snapshot.secondary_approaches %} · {{ section.recommendation_snapshot.secondary_approaches|join:", " }}{% endif %}</p>
+        <details><summary>Selected transcript</summary><p>{{ section.transcript_snapshot }}</p></details>
+        {% if section.research_required %}<p><strong>Research required:</strong> {{ section.research_reason }}</p>{% endif %}
+        <form method="post" action="{% url 'editorial:edit_reaction_plan_section' section.pk %}">
+            {% csrf_token %}{{ row.form.as_p }}
+            {% if not is_stale and plan.status == "draft" %}<button>Update section</button>{% endif %}
+        </form>
+    </article>
+    {% endwith %}
+    {% empty %}<p>No sections were saved.</p>{% endfor %}
+</section>
+{% endblock %}

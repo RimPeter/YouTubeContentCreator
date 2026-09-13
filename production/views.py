@@ -10,7 +10,7 @@ from analysis.models import SegmentSelection
 from scraper.models import VideoProject
 
 from .forms import SourceClipCreationForm, SourceMediaUploadForm
-from .models import MediaAsset, PipelineJob, SourceClip
+from .models import MediaAsset, NarrationTake, PipelineJob, SourceClip
 from .services.jobs import PipelineJobService
 from .services.access import ProductionServiceError
 from .services.clips import SourceClipService
@@ -189,6 +189,22 @@ def stream_source_clip(request, clip_pk):
     if not clip.processed_asset_id or not clip.processed_asset.file:
         raise Http404("Clip media is unavailable.")
     asset = clip.processed_asset
+    return stream_media_asset(request, asset)
+
+
+@login_required
+def stream_narration(request, take_pk):
+    takes = NarrationTake.objects.select_related("project", "media_asset")
+    if not (request.user.is_staff or request.user.is_superuser):
+        takes = takes.filter(project__owner=request.user)
+    take = get_object_or_404(takes, pk=take_pk)
+    if not take.media_asset.file:
+        raise Http404("Narration media is unavailable.")
+    return stream_media_asset(request, take.media_asset)
+
+
+def stream_media_asset(request, asset):
+    """Serve private media after the calling view has checked project access."""
     try:
         file_object = asset.file.storage.open(asset.file.name, "rb")
     except (FileNotFoundError, OSError):
