@@ -9,6 +9,7 @@ urlpatterns = [
     path("projects/<int:project_pk>/", views.project_dashboard, name="project_dashboard"),
     path("sources/<int:source_pk>/run/", views.run_analysis, name="run_analysis"),
     path("runs/<int:run_pk>/", views.run_detail, name="run_detail"),
+    path("runs/<int:run_pk>/delete/", views.delete_run, name="delete_run"),
     path("segments/<int:segment_pk>/select/", views.select_segment, name="select_segment"),
     path("segments/<int:segment_pk>/exclude/", views.exclude_segment, name="exclude_segment"),
     path(

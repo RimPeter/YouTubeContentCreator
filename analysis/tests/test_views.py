@@ -220,3 +220,92 @@ class AnalysisViewIntegrationTests(TestCase):
         detail = self.client.get(reverse("analysis:run_detail", args=[run.pk]))
         self.assertContains(detail, "Suggested approach: Critic")
         self.assertContains(detail, "Research recommended before use.")
+
+    def test_topic_overview_groups_existing_and_new_versions_without_changing_segments(self):
+        from analysis.services import AnalysisService
+        runs = [AnalysisService().analyze(self.source, self.user, {"fallback_max_chunks": 2}) for _ in range(2)]
+        for run in runs:
+            segments = list(run.segments.all())
+            for segment in segments:
+                segment.topic_labels = [f"Detail {segment.order}", "Shared topic"]
+                segment.save(update_fields=["topic_labels"])
+            url = reverse("analysis:run_detail", args=[run.pk])
+            response = self.client.get(url)
+            groups = response.context["topic_groups"]
+            self.assertEqual(len(groups), 1)
+            self.assertEqual(groups[0]["title"], "Shared topic")
+            self.assertEqual([row["segment"].pk for row in groups[0]["rows"]], [s.pk for s in segments])
+            self.assertContains(response, 'class="topic-group"', count=1)
+            for segment in segments:
+                self.assertContains(response, reverse("analysis:select_segment", args=[segment.pk]))
+            flat = self.client.get(url + "?view=list&sort=score")
+            self.assertNotContains(flat, 'class="topic-group"')
+            self.assertEqual(run.segments.count(), 2)
+
+    def test_fallback_sections_get_suggested_groups_and_keep_review_state(self):
+        run = self.run_analysis()
+        segments = list(run.segments.all())
+        self.client.post(reverse("analysis:select_segment", args=[segments[0].pk]), {})
+        response = self.client.get(reverse("analysis:run_detail", args=[run.pk]))
+        groups = response.context["topic_groups"]
+        self.assertTrue(all(group["suggested"] for group in groups))
+        self.assertEqual(sum(group["selected_count"] for group in groups), 1)
+        self.assertCountEqual([row["segment"].pk for group in groups for row in group["rows"]], [s.pk for s in segments])
+        self.assertContains(response, "Suggested topics use shared words")
+        self.assertContains(response, "Update selection")
+
+    def test_delete_version_removes_only_that_run_and_clears_job_link(self):
+        from analysis.services import AnalysisService
+        from production.models import PipelineJob
+        run = self.run_analysis()
+        other_run = AnalysisService().analyze(self.source, self.user)
+        segment = run.segments.first()
+        self.client.post(reverse("analysis:exclude_segment", args=[segment.pk]), {"reason": "Skip"})
+        job = PipelineJob.objects.create(project=self.project, job_type="transcript_analysis",
+            status="succeeded", idempotency_key="a" * 64, input_fingerprint="b" * 64,
+            requested_by=self.user, result_snapshot={"analysis_run_id": run.pk, "warning": "Saved warning"})
+        landing = reverse("project_workflow", args=[self.project.pk, "analysis"])
+        url = reverse("analysis:delete_run", args=[run.pk])
+        self.assertContains(self.client.get(landing), url)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        response = self.client.post(url)
+        self.assertRedirects(response, landing)
+        self.assertFalse(AnalysisRun.objects.filter(pk=run.pk).exists())
+        self.assertFalse(AnalysisSegmentReview.objects.filter(analysis_segment_id=segment.pk).exists())
+        self.assertTrue(AnalysisRun.objects.filter(pk=other_run.pk).exists())
+        job.refresh_from_db()
+        self.assertNotIn("analysis_run_id", job.result_snapshot)
+        self.assertTrue(job.result_snapshot["analysis_deleted"])
+        self.assertEqual(job.result_snapshot["warning"], "Saved warning")
+
+    def test_delete_version_rejects_other_users_csrf_and_read_only_projects(self):
+        run = self.run_analysis()
+        url = reverse("analysis:delete_run", args=[run.pk])
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(url).status_code, 404)
+        self.client.force_login(self.user)
+        csrf = Client(enforce_csrf_checks=True)
+        csrf.force_login(self.user)
+        self.assertEqual(csrf.post(url).status_code, 403)
+        for locked, status in [(True, "approved"), (False, "archived")]:
+            self.project.is_locked, self.project.status = locked, status
+            self.project.save(update_fields=["is_locked", "status"])
+            self.client.post(url)
+            self.assertTrue(AnalysisRun.objects.filter(pk=run.pk).exists())
+            landing = self.client.get(reverse("project_workflow", args=[self.project.pk, "analysis"]))
+            self.assertNotContains(landing, url)
+
+    def test_delete_version_protects_selection_history_and_running_analysis(self):
+        run = self.run_analysis()
+        url = reverse("analysis:delete_run", args=[run.pk])
+        run.status = "running"
+        run.save(update_fields=["status"])
+        self.assertContains(self.client.post(url, follow=True), "A running analysis cannot be deleted.")
+        run.status = "succeeded"
+        run.save(update_fields=["status"])
+        self.client.post(reverse("analysis:select_segment", args=[run.segments.first().pk]), {})
+        self.assertContains(self.client.post(url, follow=True), "referenced by current or past segment selections")
+        selection = SegmentSelection.objects.get()
+        self.client.post(reverse("analysis:deselect_segment", args=[selection.pk]), {})
+        self.assertContains(self.client.post(url, follow=True), "referenced by current or past segment selections")
+        self.assertTrue(AnalysisRun.objects.filter(pk=run.pk).exists())

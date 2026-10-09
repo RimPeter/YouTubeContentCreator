@@ -1,0 +1,47 @@
+<article class="card" id="segment-{{ row.segment.pk }}">
+    <h2>#{{ row.segment.order }} {{ row.segment.title }}</h2>
+    <p>Chunks {{ row.segment.start_chunk.sequence }}–{{ row.segment.end_chunk.sequence }} · {{ row.segment.start_seconds|floatformat:2 }}–{{ row.segment.end_seconds|floatformat:2 }}s · {{ row.duration_seconds|floatformat:2 }}s duration · score {{ row.segment.aggregate_score }}/100</p>
+    <p><strong>{% if run.used_fallback %}Transcript excerpt:{% else %}Summary:{% endif %}</strong> {{ row.display_summary }}</p>
+    <p><strong>Topics:</strong> {{ row.segment.topic_labels|join:", " }}</p>
+    <p><strong>Why this segment:</strong> {{ row.segment.rationale }}</p>
+    {% with recommendation=row.segment.editorial_recommendation %}
+        {% if recommendation.primary_approach %}
+        <section class="card">
+            <h3>Suggested approach: {{ recommendation.primary_approach|title }}</h3>
+            <p>Confidence: {{ recommendation.confidence|floatformat:0 }}/100{% if recommendation.secondary_approaches %} · Supporting: {{ recommendation.secondary_approaches|join:", " }}{% endif %}</p>
+            <p><strong>Why:</strong> {{ recommendation.reasoning }}</p>
+            <p><strong>Creator angle:</strong> {{ recommendation.suggested_angle }}</p>
+            {% if recommendation.research_needed %}<p><strong>Research recommended before use.</strong></p>{% endif %}
+        </section>
+        {% else %}<p class="muted">No editorial recommendation was recorded for this historical run.</p>{% endif %}
+    {% endwith %}
+    <details><summary>Score breakdown</summary>
+        <ul>{% for label, score in row.segment.component_scores.items %}<li>{{ label|title }}: {{ score }}/100</li>{% endfor %}</ul>
+    </details>
+    <details><summary>Source text</summary><p>{{ row.segment.source_text }}</p></details>
+    {% if row.selection %}
+        <p><strong>Selected</strong> · position {{ row.selection.order }}{% if row.selection.notes %} · {{ row.selection.notes }}{% endif %}</p>
+    {% elif row.review and row.review.decision == "excluded" %}
+        <p><strong>Excluded</strong>{% if row.review.reason %} · {{ row.review.reason }}{% endif %}</p>
+    {% elif row.review and row.review.decision == "removed" %}
+        <p class="muted">Removed from the selected sequence.</p>
+    {% endif %}
+    {% if run.source_video.project.status == "approved" and not run.source_video.project.is_locked and not is_stale %}
+        <form method="post" action="{% url 'analysis:select_segment' row.segment.pk %}">
+            {% csrf_token %}
+            {{ row.form.as_p }}
+            <button type="submit">{% if row.selection %}Update selection{% elif row.review and row.review.decision == "excluded" %}Restore and select{% else %}Select segment{% endif %}</button>
+        </form>
+        {% if row.selection %}
+        <form method="post" action="{% url 'analysis:deselect_segment' row.selection.pk %}">
+            {% csrf_token %}<button class="danger" type="submit">Remove selection</button>
+        </form>
+        {% else %}
+        <form method="post" action="{% url 'analysis:exclude_segment' row.segment.pk %}">
+            {% csrf_token %}
+            {{ row.exclusion_form.as_p }}
+            <button class="danger" type="submit">Exclude segment</button>
+        </form>
+        {% endif %}
+    {% endif %}
+</article>

@@ -10,6 +10,16 @@
 {% for artifact in artifacts %}<section class="card">
 <h2><a href="{{ artifact.url }}">{{ artifact.title }} #{{ artifact.pk }}{% if artifact.version %} · v{{ artifact.version }}{% endif %}</a></h2>
 <p>{{ artifact.status }}</p>
+{% if stage.key == "analysis" and not project.is_locked and project.status != "archived" %}
+<details>
+    <summary>Delete version {{ artifact.version }}</summary>
+    <p>Permanently delete analysis version {{ artifact.version }} and its sections and review notes? Versions referenced by current or past selections cannot be deleted.</p>
+    <form method="post" action="{% url 'analysis:delete_run' artifact.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="danger">Permanently delete version {{ artifact.version }}</button>
+    </form>
+</details>
+{% endif %}
 </section>{% empty %}<div class="card"><p>No saved work in this stage yet.</p><a href="{{ prerequisite.url }}">Go to {{ prerequisite.label }}</a></div>{% endfor %}
 {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
 {% if page.has_next %}<a href="?page={{ page.next_page_number }}">Next</a>{% endif %}

@@ -6,56 +6,51 @@
 <p>{{ run.get_status_display }}{% if run.used_fallback %} · deterministic fallback{% endif %}{% if is_stale %} · stale{% endif %}</p>
 {% if run.error_message %}<p class="muted">{{ run.error_message }}</p>{% endif %}
 <p>Source fingerprint: <code>{{ run.source_fingerprint }}</code></p>
-<p>Sort: <a href="?sort=source">source order</a> · <a href="?sort=score">score</a></p>
+<p>Sort: <a href="?sort=source&amp;view={{ display }}">source order</a> · <a href="?sort=score&amp;view={{ display }}">score</a></p>
 <p class="muted">Review each suggested topic, adjust its boundaries if needed, then select it for clip creation or exclude it with an optional reason.</p>
 
-{% for row in segment_rows %}
-<article class="card">
-    <h2>#{{ row.segment.order }} {{ row.segment.title }}</h2>
-    <p>Chunks {{ row.segment.start_chunk.sequence }}–{{ row.segment.end_chunk.sequence }} · {{ row.segment.start_seconds|floatformat:2 }}–{{ row.segment.end_seconds|floatformat:2 }}s · {{ row.duration_seconds|floatformat:2 }}s duration · score {{ row.segment.aggregate_score }}/100</p>
-    <p><strong>Summary:</strong> {{ row.segment.summary }}</p>
-    <p><strong>Topics:</strong> {{ row.segment.topic_labels|join:", " }}</p>
-    <p><strong>Why this segment:</strong> {{ row.segment.rationale }}</p>
-    {% with recommendation=row.segment.editorial_recommendation %}
-        {% if recommendation.primary_approach %}
-        <section class="card">
-            <h3>Suggested approach: {{ recommendation.primary_approach|title }}</h3>
-            <p>Confidence: {{ recommendation.confidence|floatformat:0 }}/100{% if recommendation.secondary_approaches %} · Supporting: {{ recommendation.secondary_approaches|join:", " }}{% endif %}</p>
-            <p><strong>Why:</strong> {{ recommendation.reasoning }}</p>
-            <p><strong>Creator angle:</strong> {{ recommendation.suggested_angle }}</p>
-            {% if recommendation.research_needed %}<p><strong>Research recommended before use.</strong></p>{% endif %}
-        </section>
-        {% else %}<p class="muted">No editorial recommendation was recorded for this historical run.</p>{% endif %}
-    {% endwith %}
-    <details><summary>Score breakdown</summary>
-        <ul>{% for label, score in row.segment.component_scores.items %}<li>{{ label|title }}: {{ score }}/100</li>{% endfor %}</ul>
-    </details>
-    <details><summary>Source text</summary><p>{{ row.segment.source_text }}</p></details>
-    {% if row.selection %}
-        <p><strong>Selected</strong> · position {{ row.selection.order }}{% if row.selection.notes %} · {{ row.selection.notes }}{% endif %}</p>
-    {% elif row.review and row.review.decision == "excluded" %}
-        <p><strong>Excluded</strong>{% if row.review.reason %} · {{ row.review.reason }}{% endif %}</p>
-    {% elif row.review and row.review.decision == "removed" %}
-        <p class="muted">Removed from the selected sequence.</p>
-    {% endif %}
-    {% if run.source_video.project.status == "approved" and not run.source_video.project.is_locked and not is_stale %}
-        <form method="post" action="{% url 'analysis:select_segment' row.segment.pk %}">
-            {% csrf_token %}
-            {{ row.form.as_p }}
-            <button type="submit">{% if row.selection %}Update selection{% elif row.review and row.review.decision == "excluded" %}Restore and select{% else %}Select segment{% endif %}</button>
-        </form>
-        {% if row.selection %}
-        <form method="post" action="{% url 'analysis:deselect_segment' row.selection.pk %}">
-            {% csrf_token %}<button class="danger" type="submit">Remove selection</button>
-        </form>
-        {% else %}
-        <form method="post" action="{% url 'analysis:exclude_segment' row.segment.pk %}">
-            {% csrf_token %}
-            {{ row.exclusion_form.as_p }}
-            <button class="danger" type="submit">Exclude segment</button>
-        </form>
-        {% endif %}
-    {% endif %}
-</article>
+<nav aria-label="Segment display">
+    <a href="?view=topics&amp;sort={{ sort }}"{% if display == "topics" %} aria-current="page"{% endif %}>Grouped by topic</a>
+    <a href="?view=list&amp;sort={{ sort }}"{% if display == "list" %} aria-current="page"{% endif %}>All sections</a>
+</nav>
+{% if display == "topics" %}
+<p>{{ segment_rows|length }} sections in {{ topic_groups|length }} topic groups. Expand a topic to review its sections. Sorting applies within groups; groups follow their first section.</p>
+{% if has_suggested_groups %}<p class="muted">Suggested topics use shared words in the source text because saved topic labels are unavailable. They may need your review.</p>{% endif %}
+<div class="topic-controls" hidden>
+    <button type="button" data-topics-open="true">Expand all topics</button>
+    <button type="button" data-topics-open="false">Collapse all topics</button>
+</div>
+{% for group in topic_groups %}
+<details class="topic-group">
+    <summary>{{ group.title }} <span class="muted">&middot; {{ group.rows|length }} section{{ group.rows|length|pluralize }} &middot; {{ group.selected_count }} selected &middot; {{ group.excluded_count }} excluded{% if group.suggested %} &middot; suggested topic{% endif %}</span>
+        <span class="topic-progress">
+            <span id="topic-progress-{{ forloop.counter }}">Segment selection completion: {{ group.completion_percent }}% ({{ group.completed_count }}/{{ group.rows|length }} selected or excluded)</span>
+            <progress value="{{ group.completed_count }}" max="{{ group.rows|length }}" aria-labelledby="topic-progress-{{ forloop.counter }}">{{ group.completion_percent }}%</progress>
+        </span>
+    </summary>
+    <div class="topic-sections">
+    {% for row in group.rows %}{% include "analysis/_segment_card.html" %}{% endfor %}
+    </div>
+</details>
 {% empty %}<p>No segments were persisted for this run.</p>{% endfor %}
+{% else %}
+{% for row in segment_rows %}
+{% include "analysis/_segment_card.html" %}
+{% empty %}<p>No segments were persisted for this run.</p>{% endfor %}
+{% endif %}
+{% endblock %}
+{% block extra_body %}
+<script>
+(() => {
+    const controls = document.querySelector('.topic-controls');
+    if (!controls) return;
+    controls.hidden = false;
+    controls.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-topics-open]');
+        if (button) document.querySelectorAll('.topic-group').forEach(group => {
+            group.open = button.dataset.topicsOpen === 'true';
+        });
+    });
+})();
+</script>
 {% endblock %}

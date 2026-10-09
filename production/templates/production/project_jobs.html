@@ -9,6 +9,7 @@
     {% if job.job_type == "transcript_analysis" %}<h2>Transcript analysis</h2>{% endif %}
     {% if job.job_type == "sequence_reaction" %}<h2>Continuous reaction script</h2>{% endif %}
     {% if job.result_snapshot.analysis_run_id %}<p><a href="{% url 'analysis:run_detail' job.result_snapshot.analysis_run_id %}">Review analysis</a></p>{% endif %}
+    {% if job.result_snapshot.analysis_deleted %}<p>Analysis version deleted.</p>{% endif %}
     {% if job.result_snapshot.sequence_draft_id %}<p><a href="{% url 'editorial:reaction_sequence_draft_detail' job.result_snapshot.sequence_draft_id %}">Review generated script</a></p>{% endif %}
     {% if job.result_snapshot.warning %}<p role="status">{{ job.result_snapshot.warning }}</p>{% endif %}
     <h2>{% if job.job_type == "ai_research" or job.job_type == "ai_reaction" %}<a href="{% url 'editorial:research_detail' job.input_snapshot.package_id %}">{% if job.job_type == "ai_reaction" %}AI reaction script{% else %}AI research{% endif %} · job {{ job.pk }}</a>{% elif job.source_clip %}<a href="{% url 'production:clip_detail' job.source_clip.pk %}">Clip {{ job.source_clip.version }} · {{ job.source_clip.selected_segment.analysis_segment.title }}</a>{% else %}Job {{ job.pk }}{% endif %}</h2>

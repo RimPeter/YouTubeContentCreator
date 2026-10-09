@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 import math
+from .summaries import fallback_excerpt
 
 
 SCORE_DIMENSIONS = (
@@ -253,7 +254,7 @@ def build_fallback_output(chunks, max_chunks):
                 "start_sequence": group[0].sequence,
                 "end_sequence": group[-1].sequence,
                 "title": f"Transcript section {number}",
-                "summary": text[:400].strip(),
+                "summary": fallback_excerpt(text),
                 "topic_labels": ["deterministic-fallback"],
                 "scores": {name: 50.0 for name in SCORE_DIMENSIONS},
                 "rationale": "Deterministic fallback segment; human editorial review is required.",

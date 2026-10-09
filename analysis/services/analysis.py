@@ -44,6 +44,32 @@ class AnalysisService:
         self.provider = provider
 
     @staticmethod
+    def delete_run(run, user):
+        from analysis.models import SegmentSelection
+        from production.models import PipelineJob
+        with transaction.atomic():
+            project = lock_project(run.source_video.project_id)
+            if not user.is_active or not (project.owner_id == user.pk or user.is_staff or user.is_superuser):
+                raise AnalysisPermissionError("You cannot delete this analysis version.")
+            if project.is_locked or project.status == VideoProject.Status.ARCHIVED:
+                raise AnalysisInputError("Unlock the project before deleting versions; archived projects are read-only.")
+            current = AnalysisRun.objects.filter(pk=run.pk, source_video__project=project).first()
+            if current is None:
+                raise AnalysisInputError("This analysis version has already been deleted.")
+            if current.status == AnalysisRun.Status.RUNNING:
+                raise AnalysisInputError("A running analysis cannot be deleted.")
+            if SegmentSelection.objects.filter(analysis_segment__analysis_run=current).exists():
+                raise AnalysisInputError("This version is referenced by current or past segment selections and cannot be deleted.")
+            # Keep job history, but remove links to the deleted result.
+            for job in PipelineJob.objects.filter(project=project, result_snapshot__analysis_run_id=current.pk):
+                result = dict(job.result_snapshot)
+                result.pop("analysis_run_id", None)
+                result["analysis_deleted"] = True
+                job.result_snapshot = result
+                job.save(update_fields=["result_snapshot"])
+            current.delete()
+
+    @staticmethod
     def ensure_analysis_allowed(source_video, user):
         project = source_video.project
         if not user or not user.is_active or not user.is_authenticated or (

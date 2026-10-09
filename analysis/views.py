@@ -9,6 +9,8 @@ from scraper.models import SourceVideo, VideoProject
 from .forms import AnalysisConfigurationForm, SegmentExclusionForm, SegmentSelectionForm
 from .models import AnalysisRun, AnalysisSegment, AnalysisSegmentReview, SegmentSelection
 from .services.jobs import AnalysisJobService
+from .services.topic_groups import group_segment_rows
+from .services.summaries import fallback_excerpt
 from .services import (
     AnalysisService,
     AnalysisServiceError,
@@ -110,6 +112,20 @@ def run_analysis(request, source_pk):
 
 
 @login_required
+@require_POST
+def delete_run(request, run_pk):
+    run = get_object_or_404(run_queryset_for(request.user), pk=run_pk)
+    project_pk, version = run.source_video.project_id, run.version
+    try:
+        AnalysisService.delete_run(run, request.user)
+    except AnalysisServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"Analysis version {version} deleted.")
+    return redirect("project_workflow", pk=project_pk, stage="analysis")
+
+
+@login_required
 def run_detail(request, run_pk):
     run = get_object_or_404(run_queryset_for(request.user), pk=run_pk)
     sort = request.GET.get("sort", "source")
@@ -145,6 +161,7 @@ def run_detail(request, run_pk):
         segment_rows.append(
             {
                 "segment": segment,
+                "display_summary": fallback_excerpt(segment.source_text) if run.used_fallback else segment.summary,
                 "selection": selection,
                 "review": latest_reviews.get(segment.pk),
                 "form": SegmentSelectionForm(initial=initial),
@@ -152,12 +169,16 @@ def run_detail(request, run_pk):
                 "duration_seconds": segment.end_seconds - segment.start_seconds,
             }
         )
+    topic_groups = group_segment_rows(segment_rows)
     return render(
         request,
         "analysis/run_detail_improved.html",
         {
             "run": run,
             "segment_rows": segment_rows,
+            "topic_groups": topic_groups,
+            "has_suggested_groups": any(group["suggested"] for group in topic_groups),
+            "display": "list" if request.GET.get("view") == "list" else "topics",
             "sort": sort,
             "is_stale": AnalysisService.is_stale(run),
         },
