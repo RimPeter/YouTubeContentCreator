@@ -249,7 +249,10 @@ def stream_media_asset(request, asset):
 def project_jobs(request, project_pk):
     project = get_object_or_404(project_queryset_for(request.user), pk=project_pk)
     jobs = project.pipeline_jobs.select_related("source_clip").order_by("-created_at")[:100]
-    return render(request, "production/project_jobs.html", {"project": project, "jobs": jobs})
+    return render(request, "production/project_jobs.html", {
+        "project": project, "jobs": jobs,
+        "has_active_jobs": project.pipeline_jobs.filter(status__in=["queued", "running"]).exists(),
+    })
 
 
 def job_queryset_for(user):

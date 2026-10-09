@@ -165,12 +165,14 @@ class PipelineJobService:
             return job
 
     @classmethod
-    def succeed(cls, attempt):
+    def succeed(cls, attempt, result=None):
         with transaction.atomic():
             lock_project(attempt.project_id)
             job = cls._running(attempt)
             job.status = PipelineJob.Status.SUCCEEDED
             job.progress = 100
+            if result is not None:
+                job.result_snapshot = result
             job.completed_at = timezone.now()
             job.lease_expires_at = None
             job.save()
@@ -283,7 +285,7 @@ class PipelineJobService:
         candidates = PipelineJob.objects.filter(
             status=PipelineJob.Status.QUEUED, available_at__lte=timezone.now(),
         ).filter(
-            Q(job_type="clip_trim", source_clip__isnull=False) | Q(job_type__in=["ai_research", "ai_reaction"])
+            Q(job_type="clip_trim", source_clip__isnull=False) | Q(job_type__in=["ai_research", "ai_reaction", "transcript_analysis", "sequence_reaction"])
         ).order_by("available_at", "created_at")
         for job in list(candidates[:20]):
             try:

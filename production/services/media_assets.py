@@ -99,6 +99,12 @@ class MediaAssetService:
             except MediaProbeError as exc:
                 raise MediaAssetValidationError(str(exc), exc.code) from exc
 
+            # Copy private bytes before taking SQLite's database-wide writer lock.
+            # The row is attached only after lifecycle and ownership are rechecked.
+            asset = MediaAsset(project=project, kind=kind)
+            with open(temporary_path, "rb") as handle:
+                asset.file.save(f"upload{extension}", File(handle), save=False)
+            stored_name = asset.file.name
             with transaction.atomic():
                 locked_project = lock_project(project.pk)
                 ensure_production_allowed(locked_project, user)
@@ -122,6 +128,7 @@ class MediaAssetService:
                         or 0
                     ) + 1
                 asset = MediaAsset(
+                    file=stored_name,
                     project=locked_project,
                     version=version,
                     kind=kind,
@@ -149,9 +156,6 @@ class MediaAssetService:
                 )
                 if lineage_id is not None:
                     asset.lineage_id = lineage_id
-                with open(temporary_path, "rb") as handle:
-                    asset.file.save(f"upload{extension}", File(handle), save=False)
-                stored_name = asset.file.name
                 asset.full_clean()
                 asset.save()
             transaction_committed = True
@@ -212,6 +216,13 @@ class MediaAssetService:
         stored_name = ""
         committed = False
         try:
+            if attempt is not None:
+                from .jobs import PipelineJobService
+                PipelineJobService._running(attempt)
+            asset = MediaAsset(project=project, kind=kind)
+            with local_path.open("rb") as handle:
+                asset.file.save(f"generated{extension}", File(handle), save=False)
+            stored_name = asset.file.name
             with transaction.atomic():
                 locked_project = lock_project(project.pk)
                 ensure_production_allowed(locked_project, user)
@@ -234,6 +245,7 @@ class MediaAssetService:
                         or 0
                     ) + 1
                 asset = MediaAsset(
+                    file=stored_name,
                     project=locked_project,
                     version=version,
                     kind=kind,
@@ -261,9 +273,6 @@ class MediaAssetService:
                 )
                 if lineage_id is not None:
                     asset.lineage_id = lineage_id
-                with local_path.open("rb") as handle:
-                    asset.file.save(f"generated{extension}", File(handle), save=False)
-                stored_name = asset.file.name
                 asset.full_clean()
                 asset.save()
             committed = True

@@ -172,7 +172,7 @@ class AnalysisViewIntegrationTests(TestCase):
         )
 
     @override_settings(OPENAI_API_KEY="test-secret", OPENAI_ANALYSIS_MODEL="test-model")
-    @patch("analysis.views.OpenAITranscriptAnalysisProvider")
+    @patch("analysis.services.jobs.OpenAITranscriptAnalysisProvider")
     def test_run_analysis_uses_topic_provider_when_configured(self, provider_class):
         provider = provider_class.return_value
         provider.name = "openai"
@@ -204,9 +204,15 @@ class AnalysisViewIntegrationTests(TestCase):
             reverse("analysis:run_analysis", args=[self.source.pk]),
             {"fallback_max_chunks": 2, "max_provider_attempts": 1},
         )
-        run = AnalysisRun.objects.get()
-        self.assertRedirects(response, reverse("analysis:run_detail", args=[run.pk]))
-        provider_class.assert_called_once_with()
+        from analysis.services.jobs import AnalysisJobService
+        from production.services.jobs import PipelineJobService
+        from production.models import PipelineJob
+        self.assertRedirects(response, reverse("production:project_jobs", args=[self.project.pk]))
+        provider_class.assert_not_called()
+        self.assertFalse(AnalysisRun.objects.exists())
+        job = PipelineJobService.start(PipelineJob.objects.get(job_type="transcript_analysis"))
+        run = AnalysisJobService.process_job(job)
+        provider_class.assert_called_once_with("test-model")
         self.assertFalse(run.used_fallback)
         self.assertEqual(run.provider, "openai")
         self.assertEqual(run.model, "test-model")

@@ -4,11 +4,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Max
 
 from editorial.models import ReactionSequenceDraft, ReactionSequenceDraftSection, ReactionSequencePlan
 from production.services.fingerprints import fingerprint_json
+from production.services.jobs import PipelineJobService, PipelineJobStateError
 
 from .access import EditorialServiceError, editorial_transaction, ensure_editorial_allowed
 from .reaction_sequence_plans import ReactionSequencePlanService
@@ -112,7 +114,7 @@ class ReactionSequenceDraftService:
                 "rationale": "Deterministic continuous draft requiring human editorial review."}
 
     @classmethod
-    def generate(cls, plan, user, *, use_ai=True):
+    def generate(cls, plan, user, *, use_ai=True, job=None, provider=None):
         try:
             with editorial_transaction(plan.project_id, user):
                 plan = ReactionSequencePlan.objects.select_for_update().prefetch_related("sections").get(pk=plan.pk)
@@ -122,17 +124,33 @@ class ReactionSequenceDraftService:
                 if ReactionSequencePlanService.is_stale(plan):
                     raise EditorialServiceError("Reaction plan inputs changed; create a new plan.", "reaction_plan_stale")
                 fingerprint = fingerprint_json({"plan": plan.input_fingerprint, "plan_id": plan.pk, "prompt": PROMPT_VERSION})
+                payload = cls._payload(plan)
+                payload_fingerprint = fingerprint_json(payload)
+                if job:
+                    PipelineJobService._running(job)
+                    if payload_fingerprint != job.input_snapshot["payload_fingerprint"]:
+                        raise EditorialServiceError("Reaction plan changed; request a new script.")
         except EditorialServiceError as exc:
             if exc.code == "reaction_plan_stale":
                 ReactionSequencePlan.objects.filter(pk=plan.pk).update(status=ReactionSequencePlan.Status.STALE)
             raise
-        provider = OpenAISequenceReactionProvider() if use_ai and settings.OPENAI_API_KEY else None
-        raw = provider.generate(cls._payload(plan)) if provider else cls._fallback(plan)
+        provider = provider or (OpenAISequenceReactionProvider(
+            job.configuration_snapshot["model"] if job else None
+        ) if use_ai and (job or settings.OPENAI_API_KEY) else None)
+        if job:
+            PipelineJobService.update_progress(job, 20)
+        raw = provider.generate(payload) if provider else cls._fallback(plan)
         result = cls._validate(plan, raw)
+        if job:
+            user = get_user_model().objects.filter(pk=job.requested_by_id, is_active=True).first()
         with editorial_transaction(plan.project_id, user):
             plan = ReactionSequencePlan.objects.select_for_update().prefetch_related("sections").get(pk=plan.pk)
             if plan.status != ReactionSequencePlan.Status.READY or ReactionSequencePlanService.is_stale(plan):
                 raise EditorialServiceError("Reaction plan changed during generation; create a new draft.")
+            if fingerprint_json(cls._payload(plan)) != payload_fingerprint:
+                raise EditorialServiceError("Reaction plan text changed during generation; create a new draft.")
+            if job:
+                PipelineJobService._running(job)
             version = (ReactionSequenceDraft.objects.filter(plan=plan).aggregate(latest=Max("version"))["latest"] or 0) + 1
             script = "\n\n".join([result["opening"], *[
                 "\n\n".join(part for part in (section["reaction_text"], section["bridge"]) if part)
@@ -145,4 +163,38 @@ class ReactionSequenceDraftService:
             ReactionSequenceDraftSection.objects.bulk_create([ReactionSequenceDraftSection(draft=draft, order=index,
                 plan_section=item["plan_section"], reaction_text=item["reaction_text"], bridge=item["bridge"])
                 for index, item in enumerate(result["sections"], 1)])
+            if job:
+                PipelineJobService.succeed(job, {"sequence_draft_id": draft.pk})
             return draft
+
+    @classmethod
+    def enqueue(cls, plan, user):
+        if not settings.OPENAI_API_KEY:
+            raise EditorialServiceError("Configure OPENAI_API_KEY or choose a basic draft.")
+        with editorial_transaction(plan.project_id, user):
+            plan = ReactionSequencePlan.objects.select_related("project").get(pk=plan.pk)
+            if plan.status != ReactionSequencePlan.Status.READY or ReactionSequencePlanService.is_stale(plan):
+                raise EditorialServiceError("Mark a current reaction plan ready before generating its draft.")
+            payload = cls._payload(plan)
+            if len(json.dumps(payload)) > 500_000:
+                raise EditorialServiceError("The plan is too large for one AI script. Use fewer source segments.")
+            return PipelineJobService.enqueue(
+                plan.project, "sequence_reaction", user,
+                input_snapshot={"plan_id": plan.pk, "payload_fingerprint": fingerprint_json(payload)},
+                configuration={"model": settings.OPENAI_REACTION_MODEL, "prompt_version": PROMPT_VERSION},
+                max_attempts=2,
+            )[0]
+
+    @classmethod
+    def process_job(cls, job, provider=None):
+        try:
+            user = get_user_model().objects.get(pk=job.requested_by_id, is_active=True)
+            plan = ReactionSequencePlan.objects.get(pk=job.input_snapshot["plan_id"], project_id=job.project_id)
+            return cls.generate(plan, user, job=job, provider=provider)
+        except Exception as exc:
+            message = str(exc) if isinstance(exc, EditorialServiceError) else "Script generation failed. Review the job and retry."
+            try:
+                PipelineJobService.fail(job, "sequence_reaction_failed", message)
+            except PipelineJobStateError:
+                pass
+            raise EditorialServiceError(message) from None

@@ -48,7 +48,13 @@ Changing a selection or source invalidates affected clips and editorial work. **
 
 ## Worker operation and recovery
 
-The database-backed worker handles `clip_trim`, `ai_research`, and `ai_reaction` jobs. Short analysis and basic editorial draft generation still run synchronously. Web and worker processes must share the same database, media directory, and configuration. Restart the worker after code changes; it does not auto-reload. Start with one worker for a local SQLite installation; SQLite serializes writes and is intended here for a single-host deployment. Do not put the database on a network filesystem.
+The database-backed worker handles `clip_trim`, `ai_research`, `ai_reaction`, `transcript_analysis`, and `sequence_reaction` jobs. AI transcript analysis and continuous reaction scripts return immediately to Jobs, which refreshes while work is active and links to completed results. Deterministic analysis and basic editorial drafts still run synchronously. Web and worker processes must share the same database, media directory, and configuration. Restart the worker after code changes; it does not auto-reload. Start with one worker for a local SQLite installation; SQLite serializes writes and is intended here for a single-host deployment. Do not put the database on a network filesystem.
+
+Apply migrations before starting the updated application: `python manage.py migrate`. The additive `production.0006_pipeline_job_result` migration stores job result references. Repeated submissions reuse active analysis jobs; after completion, **Run new analysis** deliberately creates a new run, including after credentials are corrected. Continuous script requests reuse active or successful work for the same plan content and model. Changed inputs, cancellation, or an expired lease prevent late results from being published. New analysis jobs create their analysis record only when results are ready to commit, so interrupted work remains visible in Jobs without leaving a permanently running analysis record.
+
+Analysis fallback messages distinguish authentication, quota, connectivity, timeout, and invalid-output failures. Authentication and quota failures are not retried within an attempt. Diagnostic logging includes only source IDs, error categories, and attempt numbers. A fallback is always identified on both the result and Jobs pages.
+
+Media copies occur before the database write transaction. The attachment transaction rechecks project access, lifecycle state, and any worker lease; failed attachment removes the staged file. An abrupt process termination during the copy can still leave an unreferenced storage file, so database/media backups remain necessary. Workflow indicators summarize current artifact versions; historical versions remain available in stage listings. Dashboard guidance follows the current plan, script, recording, and handoff chain.
 
 ```text
 python -B manage.py run_pipeline_worker --poll-interval 2

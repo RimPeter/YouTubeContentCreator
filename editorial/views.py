@@ -131,6 +131,11 @@ def ready_reaction_plan(request, plan_pk):
 def generate_reaction_sequence_draft(request, plan_pk):
     plan = get_object_or_404(plan_qs(request.user), pk=plan_pk)
     try:
+        from django.conf import settings
+        if request.POST.get("mode") != "basic" and settings.OPENAI_API_KEY:
+            ReactionSequenceDraftService.enqueue(plan, request.user)
+            messages.success(request, "Continuous script queued. Follow its progress in Jobs.")
+            return redirect("production:project_jobs", project_pk=plan.project_id)
         draft = ReactionSequenceDraftService.generate(plan, request.user, use_ai=request.POST.get("mode") != "basic")
     except EditorialServiceError as exc:
         messages.error(request, str(exc))

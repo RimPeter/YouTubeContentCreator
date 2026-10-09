@@ -6,16 +6,11 @@ from django.shortcuts import render
 from django.urls import reverse
 
 from analysis.models import AnalysisRun, SegmentSelection
-from editorial.models import ReactionBlock, ResearchPackage
+from editorial.models import (ReactionBlock, ResearchPackage, ReactionSequencePlan,
+                              ReactionSequenceDraft, ReactionTimeline, ReactionProductionAssembly)
 from production.models import MediaAsset, PipelineJob, SourceClip
 from scraper.models import SourceVideo, VideoProject
-
-
-def _latest_versions(queryset, parent_field):
-    newer = queryset.model.objects.filter(
-        **{parent_field: OuterRef(parent_field)}, version__gt=OuterRef("version")
-    )
-    return queryset.filter(~Exists(newer))
+from scraper.workflow import latest_versions as _latest_versions
 
 
 def _status_counts(queryset, project_field="project_id", status_field="status"):
@@ -110,6 +105,17 @@ def dashboard(request):
         .order_by().values("project_id").annotate(total=Count("pk")).values_list("project_id", "total")
     )
     summary = {"active_projects": active.count(), "pending_reviews": 0, "failed_jobs": 0, "processing_jobs": 0}
+    plans = _latest_versions(ReactionSequencePlan.objects.filter(project_id__in=project_ids), "project_id")
+    scripts = _latest_versions(ReactionSequenceDraft.objects.filter(plan__in=plans), "plan_id")
+    timelines = _latest_versions(ReactionTimeline.objects.filter(reaction_draft__in=scripts), "reaction_draft_id")
+    assemblies = _latest_versions(ReactionProductionAssembly.objects.filter(timeline__in=timelines), "timeline_id")
+    sequence_rows = {}
+    for key, queryset, project_field in (
+        ("plan", plans, "project_id"), ("script", scripts, "project_id"),
+        ("timeline", timelines, "project_id"), ("handoff", assemblies, "timeline__project_id"),
+    ):
+        for project_id, status in queryset.values_list(project_field, "status"):
+            sequence_rows.setdefault(project_id, {})[key] = status
     rows = []
     for project in active.select_related("owner").order_by("-updated_at", "-pk"):
         pk = project.pk
@@ -125,12 +131,38 @@ def dashboard(request):
         processing = jobs[pk].get("running", 0) + jobs[pk].get("queued", 0)
         stale = clips[pk].get("stale", 0) + research[pk].get("stale", 0) + reactions[pk].get("stale", 0)
         label, route = _next_action(project, counts)
+        next_url = reverse(route, args=[pk])
+        sequence = sequence_rows.get(pk, {})
+        pending += int(sequence.get("plan") == "draft")
+        pending += int(sequence.get("script") == "draft" and "timeline" not in sequence)
+        pending += int(sequence.get("timeline") == "draft")
+        pending += int(sequence.get("handoff") == "draft")
+        stale += sum(status in {"stale", "failed"} for status in sequence.values())
+        if sequence and project.status == VideoProject.Status.APPROVED and not project.is_locked and not processing:
+            # Use the same current artifact chain as the sidebar. Historical
+            # scripts and assemblies cannot send the creator back to old work.
+            stage = None
+            if any(status in {"stale", "failed"} for status in sequence.values()):
+                stage, label = "plan", "Review outdated reaction work"
+            elif sequence.get("plan") == "draft":
+                stage, label = "plan", "Review reaction plan"
+            elif "script" not in sequence:
+                stage, label = "plan", "Generate reaction script"
+            elif "timeline" not in sequence:
+                stage, label = "script", "Review script and create timeline"
+            elif sequence.get("timeline") != "ready":
+                stage, label = "recording", "Complete recording review"
+            elif sequence.get("handoff") != "ready":
+                stage, label = "handoff", "Prepare production handoff"
+            else:
+                stage, label = "handoff", "View production handoff"
+            next_url = reverse("project_workflow", args=[pk, stage])
         rows.append({
             "project": project, "pending": pending, "processing": processing, "stale": stale,
             "failed": jobs[pk].get("failed", 0), "analysis_failed": analyses[pk].get("failed", 0),
             "source_count": sum(sources[pk].values()), "selection_count": counts["selections"],
             "approved_reactions": reactions[pk].get("approved", 0),
-            "next_label": label, "next_url": reverse(route, args=[pk]),
+            "next_label": label, "next_url": next_url,
         })
         summary["pending_reviews"] += pending
         summary["failed_jobs"] += jobs[pk].get("failed", 0)

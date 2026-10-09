@@ -8,6 +8,9 @@ from production.services.jobs import PipelineJobService
 from editorial.services.ai_research import AIResearchService
 from editorial.services.ai_reactions import AIReactionService
 from editorial.services.access import EditorialServiceError
+from analysis.services.jobs import AnalysisJobService
+from analysis.services.analysis import AnalysisServiceError
+from editorial.services.reaction_sequence_drafts import ReactionSequenceDraftService
 
 
 class Command(BaseCommand):
@@ -39,11 +42,17 @@ class Command(BaseCommand):
                                 elif job.job_type == "ai_reaction":
                                     block = AIReactionService.process_job(job)
                                     result = f"reaction {block.pk} ready for review"
+                                elif job.job_type == "transcript_analysis":
+                                    run = AnalysisJobService.process_job(job)
+                                    result = f"analysis {run.pk} ready for review"
+                                elif job.job_type == "sequence_reaction":
+                                    draft = ReactionSequenceDraftService.process_job(job)
+                                    result = f"continuous script {draft.pk} ready for review"
                                 else:
                                     clip = SourceClipService().process_job(job)
                                     result = f"clip {clip.pk} ready for review"
                             self.stdout.write(f"Job {job.pk}: {result}.")
-                        except (SourceClipError, EditorialServiceError) as exc:
+                        except (SourceClipError, EditorialServiceError, AnalysisServiceError) as exc:
                             self.stderr.write(f"Job {job.pk}: {exc}")
                         processed += 1
                 except OperationalError:

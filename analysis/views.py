@@ -8,7 +8,7 @@ from scraper.models import SourceVideo, VideoProject
 
 from .forms import AnalysisConfigurationForm, SegmentExclusionForm, SegmentSelectionForm
 from .models import AnalysisRun, AnalysisSegment, AnalysisSegmentReview, SegmentSelection
-from .services.providers import OpenAITranscriptAnalysisProvider
+from .services.jobs import AnalysisJobService
 from .services import (
     AnalysisService,
     AnalysisServiceError,
@@ -90,8 +90,11 @@ def run_analysis(request, source_pk):
         messages.error(request, "Analysis configuration is invalid.")
         return redirect("analysis:project_dashboard", project_pk=source_video.project_id)
     try:
-        provider = OpenAITranscriptAnalysisProvider() if settings.OPENAI_API_KEY else None
-        run = AnalysisService(provider).analyze(
+        if settings.OPENAI_API_KEY:
+            AnalysisJobService.enqueue(source_video, request.user, form.cleaned_data)
+            messages.success(request, "Analysis queued. Follow its progress in Jobs.")
+            return redirect("production:project_jobs", project_pk=source_video.project_id)
+        run = AnalysisService().analyze(
             source_video,
             request.user,
             configuration=form.cleaned_data,

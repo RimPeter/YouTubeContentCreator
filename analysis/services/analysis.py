@@ -1,3 +1,5 @@
+import logging
+
 from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -5,6 +7,9 @@ from django.utils import timezone
 from analysis.models import AnalysisRun, AnalysisSegment
 from scraper.models import SourceVideo, VideoProject
 from scraper.services import lock_project
+from .provider_errors import AnalysisProviderError
+
+logger = logging.getLogger(__name__)
 
 from .fingerprinting import fingerprint_chunks, fingerprint_source_video, ordered_transcript_chunks
 from .validation import (
@@ -41,7 +46,7 @@ class AnalysisService:
     @staticmethod
     def ensure_analysis_allowed(source_video, user):
         project = source_video.project
-        if not user.is_authenticated or (
+        if not user or not user.is_active or not user.is_authenticated or (
             project.owner_id != user.pk and not user.is_staff and not user.is_superuser
         ):
             raise AnalysisPermissionError("You cannot analyze this project's transcripts.")
@@ -111,7 +116,8 @@ class AnalysisService:
                     raise AnalysisPersistenceError("Could not allocate an analysis version.")
         raise AnalysisPersistenceError("Could not allocate an analysis version.")
 
-    def analyze(self, source_video, user, configuration=None):
+    def analyze(self, source_video, user, configuration=None, *, job=None):
+        from production.services.jobs import PipelineJobService
         self.ensure_analysis_allowed(source_video, user)
         try:
             normalized_configuration = normalize_configuration(configuration)
@@ -119,7 +125,9 @@ class AnalysisService:
             raise AnalysisInputError(str(exc)) from exc
         chunks = ordered_transcript_chunks(source_video)
         fingerprint = fingerprint_chunks(chunks)
-        run = self._create_running_run(
+        if job and fingerprint != job.input_snapshot["source_fingerprint"]:
+            raise AnalysisInputError("The transcript changed; request a new analysis.")
+        run = None if job else self._create_running_run(
             source_video,
             user,
             normalized_configuration,
@@ -128,9 +136,12 @@ class AnalysisService:
 
         validated_segments = None
         provider_failed = False
+        provider_error = None
         if self.provider is not None:
             payload = self.transcript_payload(chunks)
             for _attempt in range(normalized_configuration["max_provider_attempts"]):
+                if job:
+                    PipelineJobService.update_progress(job, 10 + _attempt * 20)
                 try:
                     output = self.provider.analyze(payload, normalized_configuration)
                     validated_segments = validate_provider_output(
@@ -139,8 +150,18 @@ class AnalysisService:
                         normalized_configuration["score_weights"],
                     )
                     break
-                except Exception:
+                except Exception as exc:
                     provider_failed = True
+                    provider_error = exc if isinstance(exc, AnalysisProviderError) else AnalysisProviderError(
+                        "invalid_output" if isinstance(exc, AnalysisOutputValidationError) else "provider_error",
+                        "Provider output failed validation." if isinstance(exc, AnalysisOutputValidationError)
+                        else "The analysis provider failed.",
+                        retryable=isinstance(exc, AnalysisOutputValidationError),
+                    )
+                    logger.warning("Analysis provider failure: source=%s category=%s attempt=%s",
+                                   source_video.pk, provider_error.code, _attempt + 1)
+                    if not provider_error.retryable:
+                        break
 
         used_fallback = validated_segments is None
         if used_fallback:
@@ -155,7 +176,7 @@ class AnalysisService:
                     normalized_configuration["score_weights"],
                 )
             except Exception as exc:
-                AnalysisRun.objects.filter(pk=run.pk).update(
+                AnalysisRun.objects.filter(pk=run.pk if run else None).update(
                     status=AnalysisRun.Status.FAILED,
                     completed_at=timezone.now(),
                     error_code="analysis_failed",
@@ -171,9 +192,15 @@ class AnalysisService:
                 except (VideoProject.DoesNotExist, SourceVideo.DoesNotExist) as exc:
                     raise AnalysisInputError("The analysis source no longer exists.") from exc
                 current_source.project = project
+                if job:
+                    from django.contrib.auth import get_user_model
+                    user = get_user_model().objects.filter(pk=job.requested_by_id, is_active=True).first()
                 self.ensure_analysis_allowed(current_source, user)
-                if fingerprint_source_video(current_source) != run.source_fingerprint:
+                if fingerprint_source_video(current_source) != fingerprint:
                     raise AnalysisInputError("The transcript changed during analysis. Run analysis again.")
+                if job:
+                    PipelineJobService._running(job)
+                    run = self._create_running_run(current_source, user, normalized_configuration, fingerprint)
                 AnalysisSegment.objects.bulk_create(
                     [
                         AnalysisSegment(
@@ -200,9 +227,7 @@ class AnalysisService:
                 run.completed_at = timezone.now()
                 if provider_failed and used_fallback:
                     run.error_code = "provider_fallback"
-                    run.error_message = (
-                        "Provider output failed validation; deterministic fallback was used."
-                    )
+                    run.error_message = f"{provider_error.code}: {provider_error} Deterministic fallback was used."
                 run.save(
                     update_fields=[
                         "status",
@@ -212,8 +237,10 @@ class AnalysisService:
                         "error_message",
                     ]
                 )
+                if job:
+                    PipelineJobService.succeed(job, {"analysis_run_id": run.pk, "warning": run.error_message})
         except (AnalysisInputError, AnalysisPermissionError) as exc:
-            AnalysisRun.objects.filter(pk=run.pk).update(
+            AnalysisRun.objects.filter(pk=run.pk if run and not job else None).update(
                 status=AnalysisRun.Status.FAILED,
                 completed_at=timezone.now(),
                 error_code="input_changed",
@@ -221,7 +248,8 @@ class AnalysisService:
             )
             raise
         except Exception as exc:
-            AnalysisRun.objects.filter(pk=run.pk).update(
+            logger.error("Analysis persistence failure: source=%s", source_video.pk)
+            AnalysisRun.objects.filter(pk=run.pk if run and not job else None).update(
                 status=AnalysisRun.Status.FAILED,
                 completed_at=timezone.now(),
                 error_code="persistence_failed",

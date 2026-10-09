@@ -1,5 +1,6 @@
 """Project navigation. Read-only database summaries; never probe media or call providers."""
 from django.urls import reverse
+from django.db.models import Count, Exists, OuterRef
 from analysis.models import AnalysisRun, SegmentSelection
 from editorial.models import ReactionSequencePlan, ReactionSequenceDraft, ReactionTimeline, ReactionProductionAssembly, ResearchPackage
 from production.models import SourceClip, PipelineJob
@@ -39,22 +40,59 @@ def collections(project):
     }
 
 
-def navigation(project):
+def latest_versions(queryset, parent_field):
+    newer = queryset.model.objects.filter(
+        **{parent_field: OuterRef(parent_field)}, version__gt=OuterRef("version"))
+    return queryset.filter(~Exists(newer))
+
+
+def current_collections(project):
+    """Actionable versions only; collections() deliberately retains full history."""
     groups = collections(project)
+    groups["analysis"] = latest_versions(groups["analysis"], "source_video_id")
+    groups["segments"] = groups["analysis"]
+    groups["plan"] = latest_versions(groups["plan"], "project_id")
+    groups["script"] = latest_versions(groups["script"].filter(plan__in=groups["plan"]), "plan_id")
+    groups["timeline"] = latest_versions(groups["timeline"].filter(reaction_draft__in=groups["script"]), "reaction_draft_id")
+    groups["recording"] = groups["timeline"]
+    groups["handoff"] = latest_versions(groups["handoff"].filter(timeline__in=groups["timeline"]), "timeline_id")
+    groups["clips"] = latest_versions(groups["clips"].filter(selected_segment__retired_at__isnull=True), "selected_segment_id")
+    groups["research"] = latest_versions(groups["research"].filter(
+        source_clip__in=groups["clips"].filter(status="approved")), "source_clip_id")
+    newer_jobs = PipelineJob.objects.filter(project=project, job_type=OuterRef("job_type"),
+                                            idempotency_key=OuterRef("idempotency_key"), pk__gt=OuterRef("pk"))
+    groups["jobs"] = groups["jobs"].filter(~Exists(newer_jobs))
+    return groups
+
+
+COMPLETE_STATUSES = {
+    "analysis": {"succeeded"}, "plan": {"ready"}, "clips": {"approved"},
+    "research": {"ready"}, "timeline": {"recording", "ready"},
+    "recording": {"ready"}, "handoff": {"ready"}, "jobs": {"succeeded", "cancelled"},
+}
+
+
+def navigation(project):
+    groups = current_collections(project)
     rows = []
     summaries = {}
     for key, label, help_text, prerequisite in STAGES:
-        if key in {"segments", "recording"}:
-            summary = summaries["analysis" if key == "segments" else "timeline"]
+        if key == "segments":
+            runs = groups["analysis"]
+            from analysis.models import AnalysisSegment, AnalysisSegmentReview
+            segments = AnalysisSegment.objects.filter(analysis_run__in=runs)
+            reviews = AnalysisSegmentReview.objects.filter(analysis_segment_id=OuterRef("pk"))
+            total = segments.count()
+            pending = segments.filter(~Exists(reviews)).exists()
+            summary = (total, "Needs review" if pending else "Complete" if total else "Not started")
         elif key == "overview":
             summary = (1, project.get_status_display())
         else:
             # One bounded summary per stage, independent of artifact count.
-            from django.db.models import Count
             queryset = groups[key]
             if key == "selected":
                 count = queryset.count()
-                summary = (count, "In progress" if count else "Not started")
+                summary = (count, "Complete" if count else "Not started")
             else:
                 field = "transcript_status" if key == "sources" else "status"
                 counts = dict(queryset.order_by().values_list(field).annotate(total=Count("pk")))
@@ -66,8 +104,17 @@ def navigation(project):
                         status = "In progress"
                     elif key == "sources" and count and counts.get("completed") == count and project.status == "approved":
                         status = "Complete"
-                    elif key == "jobs" and count and counts.get("succeeded") == count:
+                    elif count and set(counts) <= COMPLETE_STATUSES.get(key, set()):
                         status = "Complete"
+                if key == "clips" and count < groups["selected"].count():
+                    status = "Needs update" if count else "Not started"
+                if key == "research" and count < groups["clips"].filter(status="approved").count():
+                    status = "Needs update" if count else "Not started"
+                if key == "script" and count and groups["timeline"].exclude(status="stale").exists() and not counts.get("stale") and not counts.get("failed"):
+                    status = "Complete"
+                job_type = {"analysis": "transcript_analysis", "script": "sequence_reaction"}.get(key)
+                if job_type and groups["jobs"].filter(job_type=job_type, status__in=["queued", "running"]).exists():
+                    status = "In progress"
                 summary = (count, status)
         summaries[key] = summary
         rows.append({"key": key, "label": label, "help": help_text, "prerequisite": prerequisite,

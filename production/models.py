@@ -219,6 +219,7 @@ class PipelineJob(models.Model):
     input_fingerprint = models.CharField(max_length=64, validators=[sha256_validator])
     input_snapshot = models.JSONField(default=dict, blank=True)
     configuration_snapshot = models.JSONField(default=dict, blank=True)
+    result_snapshot = models.JSONField(default=dict, blank=True)
     error_code = models.CharField(max_length=64, blank=True)
     error_message = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

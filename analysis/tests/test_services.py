@@ -85,7 +85,8 @@ class AnalysisServiceTests(TestCase):
         self.assertEqual(recommendation["confidence"], 0.0)
 
     def test_successful_provider_retry_does_not_claim_fallback(self):
-        provider = FakeProvider([RuntimeError("temporary failure"), valid_provider_output()])
+        from analysis.services.provider_errors import AnalysisProviderError
+        provider = FakeProvider([AnalysisProviderError("connection", "Connection failed.", retryable=True), valid_provider_output()])
         run = AnalysisService(provider).analyze(self.source, self.user)
         self.assertEqual(provider.calls, 2)
         self.assertFalse(run.used_fallback)

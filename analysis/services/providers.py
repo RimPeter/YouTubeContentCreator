@@ -4,6 +4,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+from .provider_errors import AnalysisProviderError
 
 
 
@@ -95,11 +96,11 @@ class OpenAITranscriptAnalysisProvider:
 
     def analyze(self, transcript, configuration):
         if not settings.OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY is not configured.")
+            raise AnalysisProviderError("authentication", "OPENAI_API_KEY is not configured.")
         payload = {"transcript": transcript, "configuration": configuration}
         serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         if len(serialized) > 500_000:
-            raise RuntimeError("Transcript is too large for a single AI analysis request.")
+            raise AnalysisProviderError("input_too_large", "Transcript is too large for a single AI analysis request.")
         body = {
             "model": self.model,
             "store": False,
@@ -155,9 +156,13 @@ class OpenAITranscriptAnalysisProvider:
             return json.loads("".join(parts))
         except HTTPError as exc:
             if exc.code in (401, 403):
-                raise RuntimeError("AI analysis authentication failed.") from None
+                raise AnalysisProviderError("authentication", "AI analysis authentication failed. Check the API key and model access.") from None
             if exc.code == 429:
-                raise RuntimeError("AI analysis hit an API quota or rate limit.") from None
-            raise RuntimeError("The AI analysis provider returned an error.") from None
-        except (URLError, TimeoutError, OSError, ValueError, TypeError, KeyError, AttributeError):
-            raise RuntimeError("AI analysis returned an incomplete or invalid response.") from None
+                raise AnalysisProviderError("quota", "AI analysis hit an API quota or rate limit. Check billing before trying again.") from None
+            raise AnalysisProviderError("provider_error", "The AI analysis provider returned an error.", retryable=exc.code >= 500) from None
+        except TimeoutError:
+            raise AnalysisProviderError("timeout", "AI analysis timed out. Try again later.", retryable=True) from None
+        except (URLError, OSError):
+            raise AnalysisProviderError("connection", "AI analysis could not connect to the provider.", retryable=True) from None
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise AnalysisProviderError("invalid_output", "AI analysis returned an incomplete or invalid response.", retryable=True) from None
